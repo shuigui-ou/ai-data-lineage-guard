@@ -6,16 +6,22 @@ verify_lineage.py — 数值血缘对账器（防 AI 偷懒核心工具）
 读入「原始数据（真值）」与「AI 产出的带血缘标签结果」，机械地逐一核对，
 抓出：抄错/算错（值≠源单元格）、派生统计不符、以及来源缺失（懒得查）的红色信号。
 
-零依赖（仅用 Python 标准库），数据源支持 .csv / .json，产出支持 .json 清单 或 .md/.txt 行内标签。
+核心仅用 Python 标准库；xlsx / parquet 为可选依赖（缺则显式报错 exit 3，绝不降级）。数据源支持 .csv / .json / .xlsx / .parquet，产出支持 .json 清单 或 .md/.txt 行内标签。
+
+依赖分级（缺依赖时显式报错，绝不降级、绝不静默跳过）：
+    · csv/json  → 纯标准库，任何环境可跑
+    · xlsx      → 需要 openpyxl（缺则 exit 3，提示 pip install openpyxl）
+    · parquet   → 需要 pyarrow（缺则 exit 3，提示 pip install pyarrow）
 """
 import sys
 import json
 import csv
 import re
+import datetime
 import argparse
 from pathlib import Path
 
-# 数据源描述（供报告打印，含 xlsx 的 sheet 名等元信息）
+# 数据源描述（供报告打印，含 xlsx 的 sheet 名、parquet 的行列数等元信息）
 LAST_SOURCE_DESC = ""
 
 
@@ -28,6 +34,8 @@ def load_source(path):
     suffix = p.suffix.lower()
     if suffix in (".xlsx", ".xlsm"):
         return _load_xlsx(p)
+    if suffix in (".parquet", ".pq"):
+        return _load_parquet(p)
     if suffix == ".json":
         with open(p, encoding="utf-8") as f:
             data = json.load(f)
@@ -116,6 +124,85 @@ def _load_xlsx(p):
             continue
         rows.append(d)
     LAST_SOURCE_DESC = f"{p} (sheet: {sheet_name})"
+    return header, rows
+
+
+def _parquet_cell(v):
+    """parquet 单元格 → 与 csv/json/xlsx 分支一致的字符串表示。
+
+    归一化规则（与现有比较逻辑对齐）：
+      None / NaN        → ""        （空值不当 "nan" 文本参与字符串身份比对）
+      bool              → "True"/"False"
+      datetime/date/time→ ISO 8601 字符串
+      Decimal / 数值    → str()
+      bytes             → utf-8 解码（失败则 replace）
+      list/dict（嵌套列）→ JSON 文本
+    """
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    if isinstance(v, float) and v != v:  # NaN
+        return ""
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return bytes(v).decode("utf-8", errors="replace")
+    if isinstance(v, datetime.datetime):
+        return v.isoformat(sep=" ")
+    if isinstance(v, datetime.date):
+        return v.isoformat()
+    if isinstance(v, datetime.time):
+        return v.isoformat()
+    if isinstance(v, (list, tuple, dict)):
+        try:
+            return json.dumps(v, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return str(v)
+    return str(v)
+
+
+def _load_parquet(p):
+    """parquet 源：pyarrow 分批读取（可选依赖）。
+
+    四个坑的处理：
+    1. pyarrow 是**可选依赖**，缺失 → 显式 ImportError（exit 3），绝不降级/静默跳过。
+    2. 分批读（iter_batches）而非全量 to_pylist，避免大表打爆内存。
+    3. 列名取 schema（而不是首行），空表也报"无任何行"，不静默 PASS。
+    4. 值统一转字符串（NaN/None → ""），与 json 分支一致，文本身份比对不失真。
+    """
+    global LAST_SOURCE_DESC
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        raise ImportError(
+            "Parquet 源需要 pyarrow，请 pip install pyarrow"
+            "（缺依赖时显式报错，不降级不跳过）"
+        )
+
+    try:
+        pf = pq.ParquetFile(str(p))
+    except Exception as e:  # 损坏文件/非 parquet → 干净报错，不漏 traceback
+        raise ValueError(f"parquet 无法打开（文件损坏或不是 parquet）: {e}")
+
+    header = list(pf.schema_arrow.names)
+    if not header:
+        raise ValueError("parquet 空表：无任何列")
+
+    rows = []
+    try:
+        for batch in pf.iter_batches(batch_size=4096):
+            for d in batch.to_pylist():
+                row = {h: _parquet_cell(d.get(h)) for h in header}
+                if all(v == "" for v in row.values()):
+                    continue
+                rows.append(row)
+    except Exception as e:
+        raise ValueError(f"parquet 读取失败: {e}")
+
+    if not rows:
+        raise ValueError("parquet 空表：无任何行")
+
+    n_rows_file = pf.metadata.num_rows
+    LAST_SOURCE_DESC = f"{p} (parquet: {len(header)} 列 x {n_rows_file} 行, 读取 {len(rows)} 行)"
     return header, rows
 
 
@@ -342,7 +429,7 @@ ICON = {"ok": "✅", "fail": "❌", "warn": "⚠️"}
 
 def main():
     ap = argparse.ArgumentParser(description="数值血缘对账器")
-    ap.add_argument("--source", required=True, help="原始数据文件 (.csv/.json/.xlsx)")
+    ap.add_argument("--source", required=True, help="原始数据文件 (.csv/.json/.xlsx/.parquet)")
     ap.add_argument("--claims", required=True, help="AI 产出 (.json 清单 或 .md/.txt 行内标签)")
     args = ap.parse_args()
 
