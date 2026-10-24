@@ -1,0 +1,51 @@
+{
+  "claims": [
+    {"id": "c1", "label": "R01 下行样本量 n_down", "value": 798, "source": {"row": 1, "col": "n_down"}},
+    {"id": "c2", "label": "R01 上行样本量 n_up", "value": 922, "source": {"row": 1, "col": "n_up"}},
+    {"id": "c3", "label": "R01 效应量 cohen_d", "value": 0.31795219774112904, "source": {"row": 1, "col": "cohen_d"}}
+  ],
+  "conclusions": [
+    {
+      "id": "fp1",
+      "type": "relational",
+      "statement": "过去 3 年该关系在前 5 名传导中表现稳定，第 2 季度达到峰值，Q2 窗口共覆盖 2 个交易日区间",
+      "verdict": "长期稳定",
+      "criterion": {
+        "metric": "R01 下行样本量 n_down",
+        "op": ">=",
+        "value": 100,
+        "source": "判定依据：下行样本量≥100（依据已核验 claim c1）"
+      },
+      "evidence": ["c1", "c2"],
+      "stance": "support"
+    },
+    {
+      "id": "fp2",
+      "type": "relational",
+      "statement": "上行效应增长约 3 倍，走强信号明确",
+      "verdict": "上行增强",
+      "criterion": {
+        "metric": "R01 上行样本量 n_up",
+        "op": ">=",
+        "value": 100,
+        "source": "判定依据：上行样本量≥100（依据已核验 claim c2）"
+      },
+      "evidence": ["c2", "c3"],
+      "stance": "support"
+    },
+    {
+      "id": "fp3",
+      "type": "relational",
+      "statement": "该关系在 2019 至 2026 年间共 8 个年度窗口内保持同向",
+      "verdict": "跨年度稳定",
+      "criterion": {
+        "metric": "R01 效应量 cohen_d",
+        "op": ">=",
+        "value": 0.3,
+        "source": "判定依据：效应量≥0.3（依据已核验 claim c3）"
+      },
+      "evidence": ["c3"],
+      "stance": "support"
+    }
+  ]
+}
