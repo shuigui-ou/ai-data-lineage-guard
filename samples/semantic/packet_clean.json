@@ -1,0 +1,413 @@
+{
+  "_doc": "语义审计备料包。本包只做确定性备料，不含任何判断结论。",
+  "generated_at": "2026-10-24 16:47:49",
+  "source": "samples\\conclusion\\relations_source.json",
+  "n_rows": 10,
+  "header": [
+    "relation_id",
+    "from_node",
+    "to_node",
+    "lag",
+    "n_up",
+    "n_down",
+    "p_raw",
+    "q_bh",
+    "cohen_d",
+    "effect_up_rel_median",
+    "effect_down_rel_median",
+    "robust_ratio_min"
+  ],
+  "checklist": [
+    {
+      "item": "unit",
+      "desc": "单位混淆：中/万元、百分数 vs 小数、千分位误读"
+    },
+    {
+      "item": "window",
+      "desc": "时间窗口错位：同一实体不同期间取错行"
+    },
+    {
+      "item": "ref",
+      "desc": "指代错位：'该产品/该公司'指到了别的行"
+    },
+    {
+      "item": "identity",
+      "desc": "标签文字描述 与 指向行的实体标识列 不一致（值碰巧对得上也要报）"
+    }
+  ],
+  "conclusion_checklist": [
+    {
+      "item": "wording",
+      "desc": "措辞强度与证据不匹配：结论说'显著/大幅/决定性'，但被引证据的效应量或幅度支撑不住"
+    },
+    {
+      "item": "leap",
+      "desc": "逻辑跳跃：相关→因果、样本内→样本外、历史同期→未来、个案→普遍规律"
+    }
+  ],
+  "boundaries": [
+    "只出线索，不下结论，不重算数值（finalize 会 lint 重算口吻）",
+    "审计必须由 fresh context 独立实例执行，同实例回看自己产出会合理化",
+    "逐项过固定清单，不得笼统判断",
+    "提示级：产出走人工复核，不单独拦下交付",
+    "措辞/跳跃提示词只标'出现了哪些词'，是否匹配由审计者判断，脚本不下判断"
+  ],
+  "items": [
+    {
+      "claim_label": "R01 下行样本量 n_down",
+      "claim_id": "e1",
+      "claim_value": 798,
+      "claim_note": "",
+      "provenance": {
+        "row": 1,
+        "col": "n_down"
+      },
+      "provenance_kind": "source",
+      "referenced_row": 1,
+      "referenced_row_identity": {
+        "relation_id": "R01",
+        "from_node": "CN_POWER_BOARD",
+        "to_node": "CN_MARGIN_BALANCE",
+        "lag": "3",
+        "n_up": "922",
+        "n_down": "798",
+        "p_raw": "2.9099284528449028e-11",
+        "q_bh": "1.6714629033141122e-09",
+        "cohen_d": "0.31795219774112904",
+        "effect_up_rel_median": "0.19850137770033505",
+        "effect_down_rel_median": "-0.06089045084249664",
+        "robust_ratio_min": "0.546"
+      }
+    },
+    {
+      "claim_label": "R01 效应量 cohen_d",
+      "claim_id": "e2",
+      "claim_value": 0.31795219774112904,
+      "claim_note": "",
+      "provenance": {
+        "row": 1,
+        "col": "cohen_d"
+      },
+      "provenance_kind": "source",
+      "referenced_row": 1,
+      "referenced_row_identity": {
+        "relation_id": "R01",
+        "from_node": "CN_POWER_BOARD",
+        "to_node": "CN_MARGIN_BALANCE",
+        "lag": "3",
+        "n_up": "922",
+        "n_down": "798",
+        "p_raw": "2.9099284528449028e-11",
+        "q_bh": "1.6714629033141122e-09",
+        "cohen_d": "0.31795219774112904",
+        "effect_up_rel_median": "0.19850137770033505",
+        "effect_down_rel_median": "-0.06089045084249664",
+        "robust_ratio_min": "0.546"
+      }
+    },
+    {
+      "claim_label": "R01 p 值 p_raw",
+      "claim_id": "e3",
+      "claim_value": 2.9099284528449028e-11,
+      "claim_note": "",
+      "provenance": {
+        "row": 1,
+        "col": "p_raw"
+      },
+      "provenance_kind": "source",
+      "referenced_row": 1,
+      "referenced_row_identity": {
+        "relation_id": "R01",
+        "from_node": "CN_POWER_BOARD",
+        "to_node": "CN_MARGIN_BALANCE",
+        "lag": "3",
+        "n_up": "922",
+        "n_down": "798",
+        "p_raw": "2.9099284528449028e-11",
+        "q_bh": "1.6714629033141122e-09",
+        "cohen_d": "0.31795219774112904",
+        "effect_up_rel_median": "0.19850137770033505",
+        "effect_down_rel_median": "-0.06089045084249664",
+        "robust_ratio_min": "0.546"
+      }
+    },
+    {
+      "claim_label": "R01 下行中位效应",
+      "claim_id": "e4",
+      "claim_value": -0.06089045084249664,
+      "claim_note": "",
+      "provenance": {
+        "row": 1,
+        "col": "effect_down_rel_median"
+      },
+      "provenance_kind": "source",
+      "referenced_row": 1,
+      "referenced_row_identity": {
+        "relation_id": "R01",
+        "from_node": "CN_POWER_BOARD",
+        "to_node": "CN_MARGIN_BALANCE",
+        "lag": "3",
+        "n_up": "922",
+        "n_down": "798",
+        "p_raw": "2.9099284528449028e-11",
+        "q_bh": "1.6714629033141122e-09",
+        "cohen_d": "0.31795219774112904",
+        "effect_up_rel_median": "0.19850137770033505",
+        "effect_down_rel_median": "-0.06089045084249664",
+        "robust_ratio_min": "0.546"
+      }
+    },
+    {
+      "claim_label": "全部关系条数",
+      "claim_id": "e5",
+      "claim_value": 10,
+      "claim_note": "",
+      "provenance": {
+        "op": "countrows",
+        "col": "relation_id"
+      },
+      "provenance_kind": "derived",
+      "referenced_rows_note": "派生聚合声明：请从 label 文字判断它指的是哪些行，如需逐行核对请回原始数据按 label 的筛选条件自行定位（不要重算数值）。"
+    }
+  ],
+  "conclusions": [
+    {
+      "conclusion_id": "k1",
+      "type": "relational",
+      "statement": "在本历史样本口径下，CN_POWER_BOARD 与 CN_MARGIN_BALANCE 呈中等强度正相关（cohen_d=0.318），统计检验 p=2.9e-11",
+      "verdict": "中等效应、统计显著",
+      "stance": "support",
+      "criterion": {
+        "metric": "R01 下行样本量 n_down",
+        "op": ">=",
+        "value": 100,
+        "source": "判定依据：下行样本量≥100（依据已核验 claim e1）"
+      },
+      "basis": {},
+      "verifiability": "",
+      "evidence": [
+        {
+          "claim_id": "e1",
+          "label": "R01 下行样本量 n_down",
+          "value": 798,
+          "referenced_row_identity": {
+            "relation_id": "R01",
+            "from_node": "CN_POWER_BOARD",
+            "to_node": "CN_MARGIN_BALANCE",
+            "lag": "3",
+            "n_up": "922",
+            "n_down": "798",
+            "p_raw": "2.9099284528449028e-11",
+            "q_bh": "1.6714629033141122e-09",
+            "cohen_d": "0.31795219774112904",
+            "effect_up_rel_median": "0.19850137770033505",
+            "effect_down_rel_median": "-0.06089045084249664",
+            "robust_ratio_min": "0.546"
+          }
+        },
+        {
+          "claim_id": "e2",
+          "label": "R01 效应量 cohen_d",
+          "value": 0.31795219774112904,
+          "referenced_row_identity": {
+            "relation_id": "R01",
+            "from_node": "CN_POWER_BOARD",
+            "to_node": "CN_MARGIN_BALANCE",
+            "lag": "3",
+            "n_up": "922",
+            "n_down": "798",
+            "p_raw": "2.9099284528449028e-11",
+            "q_bh": "1.6714629033141122e-09",
+            "cohen_d": "0.31795219774112904",
+            "effect_up_rel_median": "0.19850137770033505",
+            "effect_down_rel_median": "-0.06089045084249664",
+            "robust_ratio_min": "0.546"
+          }
+        },
+        {
+          "claim_id": "e3",
+          "label": "R01 p 值 p_raw",
+          "value": 2.9099284528449028e-11,
+          "referenced_row_identity": {
+            "relation_id": "R01",
+            "from_node": "CN_POWER_BOARD",
+            "to_node": "CN_MARGIN_BALANCE",
+            "lag": "3",
+            "n_up": "922",
+            "n_down": "798",
+            "p_raw": "2.9099284528449028e-11",
+            "q_bh": "1.6714629033141122e-09",
+            "cohen_d": "0.31795219774112904",
+            "effect_up_rel_median": "0.19850137770033505",
+            "effect_down_rel_median": "-0.06089045084249664",
+            "robust_ratio_min": "0.546"
+          }
+        }
+      ],
+      "evidence_magnitude_hints": {
+        "effect_like": [
+          {
+            "claim_id": "e2",
+            "label": "R01 效应量 cohen_d",
+            "value": 0.31795219774112904,
+            "col": "cohen_d"
+          }
+        ],
+        "pvalue_like": [
+          {
+            "claim_id": "e3",
+            "label": "R01 p 值 p_raw",
+            "value": 2.9099284528449028e-11,
+            "col": "p_raw"
+          }
+        ],
+        "sample_like": [
+          {
+            "claim_id": "e1",
+            "label": "R01 下行样本量 n_down",
+            "value": 798,
+            "col": "n_down"
+          }
+        ],
+        "other": []
+      },
+      "wording_markers": [
+        "显著"
+      ],
+      "leap_markers": {
+        "causal": [],
+        "future": [],
+        "universal": [],
+        "sample_scope": []
+      }
+    },
+    {
+      "conclusion_id": "k2",
+      "type": "relational",
+      "statement": "在该历史样本的 lag=3 口径下，观测到下行方向的中位相对效应为 -0.061",
+      "verdict": "下行中位相对效应为负",
+      "stance": "support",
+      "criterion": {},
+      "basis": {},
+      "verifiability": "",
+      "evidence": [
+        {
+          "claim_id": "e4",
+          "label": "R01 下行中位效应",
+          "value": -0.06089045084249664,
+          "referenced_row_identity": {
+            "relation_id": "R01",
+            "from_node": "CN_POWER_BOARD",
+            "to_node": "CN_MARGIN_BALANCE",
+            "lag": "3",
+            "n_up": "922",
+            "n_down": "798",
+            "p_raw": "2.9099284528449028e-11",
+            "q_bh": "1.6714629033141122e-09",
+            "cohen_d": "0.31795219774112904",
+            "effect_up_rel_median": "0.19850137770033505",
+            "effect_down_rel_median": "-0.06089045084249664",
+            "robust_ratio_min": "0.546"
+          }
+        }
+      ],
+      "evidence_magnitude_hints": {
+        "effect_like": [
+          {
+            "claim_id": "e4",
+            "label": "R01 下行中位效应",
+            "value": -0.06089045084249664,
+            "col": "effect_down_rel_median"
+          }
+        ],
+        "pvalue_like": [],
+        "sample_like": [],
+        "other": []
+      },
+      "wording_markers": [],
+      "leap_markers": {
+        "causal": [],
+        "future": [],
+        "universal": [],
+        "sample_scope": []
+      }
+    },
+    {
+      "conclusion_id": "k3",
+      "type": "recommendation",
+      "statement": "建议在当前窗口跟踪该传导方向的配置变化",
+      "verdict": "可跟踪",
+      "stance": "support",
+      "criterion": {},
+      "basis": {},
+      "verifiability": "manual",
+      "evidence": [
+        {
+          "claim_id": "e2",
+          "label": "R01 效应量 cohen_d",
+          "value": 0.31795219774112904,
+          "referenced_row_identity": {
+            "relation_id": "R01",
+            "from_node": "CN_POWER_BOARD",
+            "to_node": "CN_MARGIN_BALANCE",
+            "lag": "3",
+            "n_up": "922",
+            "n_down": "798",
+            "p_raw": "2.9099284528449028e-11",
+            "q_bh": "1.6714629033141122e-09",
+            "cohen_d": "0.31795219774112904",
+            "effect_up_rel_median": "0.19850137770033505",
+            "effect_down_rel_median": "-0.06089045084249664",
+            "robust_ratio_min": "0.546"
+          }
+        },
+        {
+          "claim_id": "e3",
+          "label": "R01 p 值 p_raw",
+          "value": 2.9099284528449028e-11,
+          "referenced_row_identity": {
+            "relation_id": "R01",
+            "from_node": "CN_POWER_BOARD",
+            "to_node": "CN_MARGIN_BALANCE",
+            "lag": "3",
+            "n_up": "922",
+            "n_down": "798",
+            "p_raw": "2.9099284528449028e-11",
+            "q_bh": "1.6714629033141122e-09",
+            "cohen_d": "0.31795219774112904",
+            "effect_up_rel_median": "0.19850137770033505",
+            "effect_down_rel_median": "-0.06089045084249664",
+            "robust_ratio_min": "0.546"
+          }
+        }
+      ],
+      "evidence_magnitude_hints": {
+        "effect_like": [
+          {
+            "claim_id": "e2",
+            "label": "R01 效应量 cohen_d",
+            "value": 0.31795219774112904,
+            "col": "cohen_d"
+          }
+        ],
+        "pvalue_like": [
+          {
+            "claim_id": "e3",
+            "label": "R01 p 值 p_raw",
+            "value": 2.9099284528449028e-11,
+            "col": "p_raw"
+          }
+        ],
+        "sample_like": [],
+        "other": []
+      },
+      "wording_markers": [],
+      "leap_markers": {
+        "causal": [],
+        "future": [],
+        "universal": [],
+        "sample_scope": []
+      }
+    }
+  ]
+}
