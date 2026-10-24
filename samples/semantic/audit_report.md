@@ -1,6 +1,6 @@
 # 语义审计线索报告（提示级 · 不拦交付）
 
-> 生成时间：2026-10-24 16:59:20 ｜ 审计器：audit_semantic.py
+> 生成时间：2026-10-24 17:05:48 ｜ 审计器：audit_semantic.py
 > 原始数据：`samples\conclusion\relations_source.json`（10 行）
 > 审计声明：5 条 ｜ 结论：3 条
 > 检查清单：声明级 4 项 + 结论级 2 项
