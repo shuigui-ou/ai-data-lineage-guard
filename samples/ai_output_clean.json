@@ -1,0 +1,9 @@
+{
+  "claims": [
+    {"label": "A产品金额", "value": 100, "source": {"row": 1, "col": "amount"}},
+    {"label": "B产品金额", "value": 250, "source": {"row": 2, "col": "amount"}},
+    {"label": "金额总额", "value": 1000, "derived": {"op": "sum", "col": "amount"}},
+    {"label": "数量均值", "value": 2.4, "derived": {"op": "mean", "col": "qty"}},
+    {"label": "D产品金额", "value": 150, "source": {"row": 4, "col": "amount"}}
+  ]
+}
