@@ -1,0 +1,37 @@
+{
+  "claims": [
+    {"id": "e1", "label": "R01 下行样本量 n_down", "value": 798, "source": {"row": 1, "col": "n_down"}},
+    {"id": "e2", "label": "R01 效应量 cohen_d", "value": 0.31795219774112904, "source": {"row": 1, "col": "cohen_d"}},
+    {"id": "e3", "label": "R01 p 值 p_raw", "value": 2.9099284528449028e-11, "source": {"row": 1, "col": "p_raw"}},
+    {"id": "e4", "label": "R01 下行中位效应", "value": -0.06089045084249664, "source": {"row": 1, "col": "effect_down_rel_median"}},
+    {"id": "e5", "label": "全部关系条数", "value": 10, "derived": {"op": "countrows", "col": "relation_id"}}
+  ],
+  "conclusions": [
+    {
+      "id": "k1",
+      "type": "relational",
+      "statement": "在本历史样本口径下，CN_POWER_BOARD 与 CN_MARGIN_BALANCE 呈中等强度正相关（cohen_d=0.318），统计检验 p=2.9e-11",
+      "verdict": "中等效应、统计显著",
+      "criterion": {"metric": "R01 下行样本量 n_down", "op": ">=", "value": 100, "source": "判定依据：下行样本量≥100（依据已核验 claim e1）"},
+      "evidence": ["e1", "e2", "e3"],
+      "stance": "support"
+    },
+    {
+      "id": "k2",
+      "type": "relational",
+      "statement": "在该历史样本的 lag=3 口径下，观测到下行方向的中位相对效应为 -0.061",
+      "verdict": "下行中位相对效应为负",
+      "evidence": ["e4"],
+      "stance": "support"
+    },
+    {
+      "id": "k3",
+      "type": "recommendation",
+      "statement": "建议在当前窗口跟踪该传导方向的配置变化",
+      "verdict": "可跟踪",
+      "verifiability": "manual",
+      "evidence": ["e2", "e3"],
+      "stance": "support"
+    }
+  ]
+}
