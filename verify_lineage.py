@@ -294,6 +294,27 @@ def load_claims(path):
         return parse_text_claims(f.read())
 
 
+def check_claim_ids(claims):
+    """claim id 唯一性检查（结论引用链的地基）。
+
+    修正 3：id 必须唯一——否则"结论引用了哪个"有歧义，
+    结论可以挑对自己有利的那个绕过检查。
+    返回 (ok: bool, dup_ids: list)
+    """
+    seen = {}
+    dups = []
+    for c in claims:
+        cid = c.get("id")
+        if cid is None:
+            continue          # id 是可选的（向后兼容）
+        key = str(cid)
+        if key in seen:
+            dups.append(key)
+        else:
+            seen[key] = True
+    return (len(dups) == 0), dups
+
+
 def parse_text_claims(text):
     claims = []
     for line in text.splitlines():
@@ -341,6 +362,12 @@ def main():
     if not claims:
         print("⚠️ 未解析到任何带标签的数值声明，请检查产出格式。")
         sys.exit(2)
+
+    # claim id 唯一性（结论引用链的地基；id 可选，故仅在有 id 时生效）
+    ids_ok, dups = check_claim_ids(claims)
+    if not ids_ok:
+        print(f"❌ claim id 重复: {sorted(set(dups))}（id 必须唯一，否则结论引用有歧义）")
+        sys.exit(3)
 
     results = [check_claim(c, header, rows) for c in claims]
 
