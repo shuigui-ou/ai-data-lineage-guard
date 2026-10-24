@@ -2,7 +2,7 @@
 name: ai-data-lineage-guard
 slug: ai-data-lineage-guard
 displayName: AI 数据核对
-version: 0.3.2
+version: 0.4.0
 author: shuigui-ou
 category: 开发工具
 tags: [数据核对, 数值血缘, 防偷懒, 统计校验, 对账, 回归验证, AI监督, 数据质量]
@@ -117,6 +117,30 @@ python emit.py --source <原始数据> --claims <AI产出> --out <交付文件�
 ```
 python verify_lineage.py --source <原始数据> --claims <AI产出>
 ```
+
+## 第 4 层：结论链检查（结论 ↔ 证据链）
+
+前三层只看「数字」；第 4 层是唯一看「**结论与数字的绑定关系**」的层。
+**不重算结论真伪**（那是制造第二份真值），只查**证据链是否成立**。
+
+启用方式：claims 文件顶层加 `conclusions` 数组，结论用 `evidence` 引用带 `id` 的 claim。
+
+| 检查 | 级别 | 查什么 |
+|---|---|---|
+| H1 引用完整性 | **硬拦** | 悬空引用 / 引用了未 PASS 的证据 / claim id 重复 / 因果类未标 `verifiability:"manual"` / criterion 缺 `source` |
+| H2 数值矛盾 | **硬拦** | 结论里的数字与被引证据"接近但不相等"（抄错） |
+| H3 阈值矛盾 | **硬拦** | 自称满足 criterion 但实际不满足 |
+| H4 方向矛盾 | **硬拦** | 结论声称方向与证据显式方向矛盾（**只查显式矛盾，不验因果**） |
+| W1 裸数字 | **提示** | 结论里的数字在被引证据中找不到（**第一版提示级**：实测误报率 100%，"过去 3 年""2019"这类叙述性数字会被扫到） |
+
+**不查**：因果/建议/预测类结论的真伪（无 ground truth）；措辞与逻辑跳跃（交第 3 层）。
+
+**已知边界（诚实声明）**：
+- 自声明阈值**可被放宽以规避**（AI 可写 `p<=0.99` 让 p=0.5 也自洽）——机器只查自洽，**不查阈值合理性**，那是领域知识。缓解：`criterion` 必须带 `source` 留痕可审。
+- **证据选择偏差查不出来**（只引支持自己的证据、漏引反证）→ 靠人工抽查。
+- 第 4 层**不能验因果方向**。
+
+单独运行：`python verify_conclusions.py --source <源> --claims <claims>`
 
 ## 三个判定
 
