@@ -80,13 +80,21 @@ def main():
     for f in skipped:
         print(f"     - {f}")
 
-    # 自检：确认包内无二进制
+    # 自检 1：确认包内无二进制
     with zipfile.ZipFile(OUT) as z:
-        bad = [n for n in z.namelist() if Path(n).suffix.lower() in EXCLUDE_SUFFIX]
+        names = z.namelist()
+        bad = [n for n in names if Path(n).suffix.lower() in EXCLUDE_SUFFIX]
+        # 自检 2：无扩展名文件（实测踩坑：LICENSE 无扩展名 → 上传被拒
+        #         "不允许的文件类型: LICENSE"；纯文本但扩展名不在白名单）
+        noext = [n for n in names if not Path(n).suffix]
     if bad:
         print(f"❌ 包内仍有二进制（上传会被拒）: {bad}")
         return 1
-    print("   自检: 包内无图片/二进制 ✅")
+    if noext:
+        print(f"❌ 包内有无扩展名文件（上传会被拒）: {noext}")
+        print("   → 请加扩展名（如 LICENSE → LICENSE.txt）")
+        return 1
+    print("   自检: 包内无图片/二进制 ✅ 无无扩展名文件 ✅")
     return 0
 
 
