@@ -2,7 +2,7 @@
 name: ai-data-lineage-guard
 slug: ai-data-lineage-guard
 displayName: AI 数据核对
-version: 0.5.0
+version: 0.5.1
 author: shuigui-ou
 category: 开发工具
 tags: [数据核对, 数值血缘, 防偷懒, 统计校验, 对账, 回归验证, AI监督, 数据质量]
