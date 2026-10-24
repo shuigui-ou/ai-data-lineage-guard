@@ -2,7 +2,7 @@
 name: ai-data-lineage-guard
 slug: ai-data-lineage-guard
 displayName: AI 数据核对
-version: 0.4.0
+version: 0.5.0
 author: shuigui-ou
 category: 开发工具
 tags: [数据核对, 数值血缘, 防偷懒, 统计校验, 对账, 回归验证, AI监督, 数据质量]
@@ -12,7 +12,7 @@ license: MIT
 pricing: free
 platforms: [win32, macos, linux]
 permission: 只读你的数据文件并写校验报告，不修改原始数据
-dependency: python>=3.9（csv/json 零依赖；xlsx 需 openpyxl）
+dependency: python>=3.9（csv/json 零依赖；xlsx 需 openpyxl；parquet 需 pyarrow）
 trigger: [统计, 汇总, 对账, 数据核对, 数值血缘, 防偷懒, AI抄错, 数据校验]
 icon: icon.png
 ---
@@ -139,6 +139,13 @@ python verify_lineage.py --source <原始数据> --claims <AI产出>
 - 自声明阈值**可被放宽以规避**（AI 可写 `p<=0.99` 让 p=0.5 也自洽）——机器只查自洽，**不查阈值合理性**，那是领域知识。缓解：`criterion` 必须带 `source` 留痕可审。
 - **证据选择偏差查不出来**（只引支持自己的证据、漏引反证）→ 靠人工抽查。
 - 第 4 层**不能验因果方向**。
+- 裸数字检测（W1）带**词法白名单**（v0.5.0）：只放过结构性叙述数字
+  （年份 / 序数排名 / 季度标签 / 窗口区间计数 / 带约数词的倍数），
+  **不放过**任何测量值（样本量、金额、百分比、效应量、无约数词的倍数）。
+  实测误报率 **100%（9/9）→ 0%（0/9）**，同时反向测试 **0/8 假阴性**
+  （真信号一条没漏）。白名单是**词法**的不是语义完美的：
+  "第 800 名"会被放过——它与证据里的 798 数值接近，但语义是排名不是测量值，
+  放过比误报硬拦更正确（H2 的判定理由必须准确）。
 
 单独运行：`python verify_conclusions.py --source <源> --claims <claims>`
 
@@ -158,14 +165,42 @@ python verify_lineage.py --source <原始数据> --claims <AI产出>
   （发布包内不放 xlsx，因上传接口禁止二进制）。
 - XLSX（**已接入 ①**）：`openpyxl` 只读分支（`read_only=True, data_only=True`），**不引入 pandas**。
   五个坑已处理：公式无缓存值显式报错（防假 PASS）、首行表头/R1 首数据行与 csv 一致、默认第一个 sheet 并在报告标注 sheet 名、缺 `openpyxl` 显式报错不降级。列按表头名引用（与 csv 一致；`C3` 位引用暂不支持）。
-- parquet（**待做 ①**）：单独 `pyarrow` 可选分支，缺依赖时显式报错而非假装 PASS。
-  口径与脚本现有"宁可失败不给假 PASS"一致。
+- Parquet（**已接入**）：单独 `pyarrow` 可选分支，缺依赖时显式报错（exit 3）而非假装 PASS。
+  五个坑已处理：① `pyarrow` 缺失 → 干净报错不降级；② 分批读（`iter_batches`）避免大表打爆内存；
+  ③ 列名取 schema（空表也报"无任何行"），不静默 PASS；④ 值统一转字符串（NaN/None → `""`），
+  与 json 分支一致，文本身份比对不失真；⑤ 损坏文件/非 parquet → 干净报错不漏 traceback。
+  类型归一化：`bool` → `True/False`；时间戳 → ISO 字符串；`Decimal`/数值 → `str()`；
+  `bytes` → utf-8 解码；嵌套列（list/dict）→ JSON 文本。
+  **等价性**：同一份数据存成 csv 与 parquet，两分支的对账结论逐条一致（数值等价，非字面相等——
+  csv 的 `amount` 是文本 `"100"`、parquet 是 float64 → `"100.0"`，数值都是 100.0）。
+  想试 parquet 分支：装 `pyarrow` 后运行 `python samples/_make_parquet.py` 生成演示样本
+  （发布包内不放 .parquet，因上传接口禁止二进制）。
 
 ## 局限（诚实边界）
 
 - 抓不到"值"和"来源"被 AI **同时**写错且恰好自洽的极端情况（概率极低，可抽查发现）。
 - 完全自由文本、无结构、无标签的数字无法验证——所以协议强制结构化产出。
 - 原始数据本身有错属于数据质量问题，不是 AI 偷懒，脚本不负责。
+- **漏采的文件查不出来**：没被采集进备料包的文件，不会出现在任何校验里。
+  防这类错要另做"源文件全集 vs 已采集合"的显式对账，本工具不管这件事。
+
+## 回归自测（一条命令跑完全部用例）
+
+```bash
+python tests/run_all.py
+```
+
+18 个用例覆盖：机械对账（csv/离散行集/xlsx/公式无缓存值/claim id 唯一性）、
+parquet（与 csv 分支等价/类型归一化/缺依赖/损坏文件）、结论链（正例 + 五个阴性对照 +
+误报探针）、词法白名单双向、语义审计（备料/汇总/清单外线索）、emit 落盘闸门、打包自检。
+
+**跳过必须显式计数**（发布包内不放二进制样本，xlsx/parquet 用例会跳过）：
+- 完整环境（装了 `openpyxl` + `pyarrow`）→ **通过 18 ｜ 跳过 0**
+- 纯净环境（仅标准库）→ **通过 12 ｜ 跳过 6**（跳过明细会打印，不静默充数）
+
+```bash
+python tests/run_all.py --list    # 只列用例
+```
 
 ## 退出码语义（供 hook / CI 直接消费）
 
@@ -174,7 +209,7 @@ python verify_lineage.py --source <原始数据> --claims <AI产出>
 | 0 | PASS：全部命中，交付文件已落盘（emit 模式） |
 | 1 | FAIL：有错位或无法验证 → **不落盘**，写 `.blocked.md` |
 | 2 | 未解析到任何带标签的数值声明（产出格式不对） |
-| 3 | 原始数据无法加载 / 依赖缺失（含 xlsx 公式无缓存值） |
+| 3 | 原始数据无法加载 / 依赖缺失（含 xlsx 公式无缓存值、parquet 缺 pyarrow） |
 
 源数据或依赖有问题时**显式报错、干净提示、绝不假 PASS**（已覆盖 `FileNotFoundError` /
 `ImportError` / `ValueError` 等，不吐裸 traceback）。
@@ -248,13 +283,29 @@ python audit_semantic.py finalize --packet trial/audit_packet.json \
     --findings trial/findings.json --out trial/semantic_audit.md
 ```
 
-### 固定检查清单（四项，逐项过，不许笼统问"你对吗"）
+### 固定检查清单（六项，逐项过，不许笼统问"你对吗"）
+
+**声明级**（对每条 claim 过一遍）
 | item | 检查什么 |
 |---|---|
 | `unit` | 单位混淆：中/万元、百分数 vs 小数、千分位误读 |
 | `window` | 时间窗口错位：同一实体不同期间取错行 |
 | `ref` | 指代错位："该产品/该公司"指到了别的行 |
 | `identity` | 标签文字描述 与 指向行的实体标识列 不一致（值碰巧对上也要报） |
+
+**结论级**（对每条 conclusion 过一遍，v0.5.0 新增）
+| item | 检查什么 |
+|---|---|
+| `wording` | 措辞强度与证据不匹配：结论说"显著/大幅/决定性"，但被引证据的效应量撑不住 |
+| `leap` | 逻辑跳跃：相关→因果、样本内→样本外、历史同期→未来、个案→普遍规律 |
+
+结论级的备料包会额外给出三样**确定性提取**的东西（只标"出现了什么"，**不下判断**）：
+- `evidence_magnitude_hints`：被引证据按「像效应量 / 像显著性 / 像样本量」分组的原值
+  （分类依据优先取 `source.col` 真实列名，其次 label——只按 label 判会漏掉中文 label 的效应量列）
+- `wording_markers`：强措辞词（显著/大幅/决定性/必然…）的出现情况，带否定守卫（"不显著"不算）
+- `leap_markers`：跳跃词分 causal / future / universal / sample_scope 四类
+
+**是否"匹配"由 fresh-context 审计者判断**——脚本只提供原值供比对，不替人定阈值。
 
 ### 四条硬边界（代码层强制，非仅写在提示里）
 1. **只出线索、不下结论、不重算** —— `finalize` 用 lint 检测"应为/重算/正确值"等口吻，
