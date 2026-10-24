@@ -82,9 +82,9 @@ def detect_direction(text):
 
 
 def extract_numbers(text):
-    """从文本抽数值 token。返回 [(原串, 数值)]。
+    """从文本抽数值 token。返回 [(原串, 数值, 起点, 终点)]。
     支持：5613 / 5,613 / 18.05% / 2.9e-11 / -0.198% / 5613 元
-    排除：年份型叙述（3 年 / 前 5 名 / Q2 之类靠上下文由调用方判断）
+    位置信息用于词法白名单的上下文判定（年份/序数/窗口计数需要看左右文）。
     """
     if not isinstance(text, str):
         return []
@@ -96,9 +96,103 @@ def extract_numbers(text):
         v = V.coerce_num(raw)
         if v is None:
             continue
-        # 排除纯年份（如 2024）与小整数序数（1/2/3 在"前3名"语境）——保守放过
-        out.append((raw, v))
+        out.append((raw, v, m.start(), m.end()))
     return out
+
+
+# ───────────────── 词法白名单（v0.5.0）─────────────────
+# 目的：把"结构性叙述数字"从 W1 裸数字检查里摘掉，降低误报。
+# 原则：**只放过不可能是"被研究量的测量值"的数字**。
+#   放过：年份、序数/排名、季度标签、窗口/区间计数、带约数词的倍数。
+#   不放过：样本量、金额、百分比、效应量、无修饰语的倍数、任何测量值。
+# 为什么这样切：叙述性数字（"过去 3 年""第 2 季度""8 个年度窗口"）
+#   本来就不该在证据表里找得到，它们的"出处"是语言不是数据；
+#   而测量值找不到出处才是真信号。全量放过 = 把闸门拆了（假阴性）。
+#
+# 诚实边界（写进报告）：白名单是**词法**的，不是语义完美的。
+#   "第 800 名"这类数字会被放过——它与证据里的 798 数值接近，
+#   但语义上是排名不是测量值，放过比误报硬拦更正确（H2 理由必须准确）。
+
+_WHITELIST_YEAR_NEXT = ("年", "至", "到")
+_WHITELIST_RANGE_NEXT = ("至", "到", "年", "季度")
+_WHITELIST_ORDINAL_PREV = ("第", "前", "首", "末", "名列", "top")
+_WHITELIST_TIME_UNIT = ("年", "个月", "月", "周", "日", "天", "小时", "分钟", "季度")
+_WHITELIST_TIME_MARK = ("过去", "最近", "近", "连续", "累计", "长达", "整整",
+                        "全年", "前年", "去年", "未来", "下个", "上个")
+# 只认【结构词】：尾部含它们才是"结构性窗口/区间计数"；
+# "个交易日"本身不算（"涉及 5 个交易日"是实体计数，必须仍报）。
+_WHITELIST_WINDOW_KEY = ("窗口", "区间", "周期", "批次", "时段")
+_WHITELIST_STRIP = ("个", "年度", "时间", "连续", "共")
+_WHITELIST_MULT_SUFFIX = ("倍",)
+_WHITELIST_MULT_HEDGE = ("约", "大约", "接近", "差不多", "超过", "超", "逾", "近")
+
+
+def _near_nonspace(text, idx, step):
+    """从 idx 沿 step 方向找第一个非空白字符；找不到返回 ""。"""
+    i = idx
+    while 0 <= i < len(text):
+        if not text[i].isspace():
+            return text[i]
+        i += step
+    return ""
+
+
+def classify_descriptive_number(text, raw, val, start, end):
+    """判定该数字是否属于"结构性叙述数字"（应从 W1/H2 中排除）。
+
+    返回放行理由字符串；不属于叙述性数字则返回 None。
+    判定只看词法上下文（左右邻字），不引入语义推断。
+    """
+    if not isinstance(text, str):
+        return None
+
+    nxt = _near_nonspace(text, end, +1)
+    prv = _near_nonspace(text, start - 1, -1)
+    after = text[end:end + 10]
+    before = text[max(0, start - 10):start]
+
+    # R1 季度标签：Q2 / q3 —— 前一字符是 Q/q
+    if prv in ("Q", "q") and len(raw) == 1 and raw.isdigit() and raw in "1234":
+        return "季度标签"
+
+    # R2 年份
+    if float(val).is_integer() and 1000 <= val <= 2999:
+        if nxt == "年":
+            return "年份"
+        if nxt in ("至", "到") and 1900 <= val <= 2099:
+            return "年份区间"
+        if prv in ("至", "到", "~", "～", "-", "—") and nxt in _WHITELIST_RANGE_NEXT \
+                and 1900 <= val <= 2099:
+            return "年份区间"
+
+    # R3 序数/排名：第 2 季度 / 前 5 名
+    if prv in _WHITELIST_ORDINAL_PREV and float(val).is_integer() and 1 <= val <= 999:
+        return "序数/排名"
+
+    # R4 时段计数：过去 3 年 / 最近 12 个月
+    after_l = after.lstrip()
+    if any(after_l.startswith(u) for u in _WHITELIST_TIME_UNIT) \
+            and any(m in before for m in _WHITELIST_TIME_MARK):
+        return "时段计数"
+
+    # R5 窗口/区间计数：共覆盖 2 个交易日区间 / 8 个年度窗口
+    tail = after_l
+    changed = True
+    while changed:
+        changed = False
+        for s in _WHITELIST_STRIP:
+            if tail.startswith(s) and len(tail) > len(s):
+                tail = tail[len(s):]
+                changed = True
+                break
+    if any(k in tail for k in _WHITELIST_WINDOW_KEY):
+        return "窗口/区间计数"
+
+    # R6 带约数词的倍数：增长约 3 倍（无约数词不放行——那是量级主张）
+    if nxt in _WHITELIST_MULT_SUFFIX and any(h in before for h in _WHITELIST_MULT_HEDGE):
+        return "倍数(带约数词)"
+
+    return None
 
 
 def _fmt(x):
@@ -237,7 +331,13 @@ def check_conclusion(conc, claims_by_id, claim_results, header, rows):
             ev_vals |= collect_evidence_values(c, header, rows)
 
     def scan_numbers(field_name, text, strict):
-        for raw, val in extract_numbers(text):
+        for raw, val, ns, ne in extract_numbers(text):
+            # -- 词法白名单：结构性叙述数字不参与 H2/W1（v0.5.0）--
+            # 必须在比对之前判：否则“第 800 名”这类数字会因与证据 798 接近而被
+            # H2 误判成“数值矛盾”——理由完全错（那不是抄错，是排名）。
+            wl = classify_descriptive_number(text, raw, val, ns, ne)
+            if wl is not None:
+                continue
             matched = False
             near_conflict = None   # 找到"数值接近但不相等"的候选 → 明确数值矛盾
             for ev in ev_vals:
