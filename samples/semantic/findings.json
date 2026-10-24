@@ -1,0 +1,53 @@
+{
+  "findings": [
+    {
+      "claim_label": "R01 下行中位效应",
+      "item": "unit",
+      "note": "标签只写“中位效应”，未体现源列带的“相对”口径；该值落在相对变化的取值区间，若被按绝对量解读会与口径不符，疑似口径标注不足（非数值对错）。",
+      "evidence": "claim_label = \"R01 下行中位效应\" vs provenance.col = \"effect_down_rel_median\"，claim_value = -0.06089045084249664",
+      "confidence": "low"
+    },
+    {
+      "claim_label": "k1",
+      "item": "wording",
+      "note": "结论称“大幅”，但被引效应量为中等量级，措辞强度疑似超出证据能支撑的范围。",
+      "evidence": "statement 含“大幅”、verdict = \"决定性\" vs evidence_magnitude_hints.effect_like: cohen_d = 0.31795219774112904",
+      "confidence": "medium"
+    },
+    {
+      "claim_label": "k1",
+      "item": "wording",
+      "note": "结论判定为“决定性”，但自声明判据只是下行样本量的下限门槛，被引证据里下行方向的效应量数值很小，判定措辞与证据量级疑似不匹配。",
+      "evidence": "verdict = \"决定性\"；criterion = {metric: \"R01 下行样本量 n_down\", op: \">=\", value: 100} vs evidence_magnitude_hints.effect_like: cohen_d = 0.31795219774112904；被引行 effect_down_rel_median = -0.06089045084249664, robust_ratio_min = 0.546",
+      "confidence": "medium"
+    },
+    {
+      "claim_label": "k2",
+      "item": "leap",
+      "note": "结论用“导致”作因果断言，而被引证据只是同一关系的历史 p 值与中位效应，未见因果识别设计说明，疑似相关→因果跳跃。",
+      "evidence": "statement 含“导致”（leap_markers.causal = [\"导致\"]）vs evidence: p_raw = 2.9099284528449028e-11、effect_down_rel_median = -0.06089045084249664；criterion = {}，verifiability = \"\"",
+      "confidence": "high"
+    },
+    {
+      "claim_label": "k2",
+      "item": "leap",
+      "note": "结论说“未来会继续如此”，被引证据是样本内、单一 lag 的历史统计量，疑似历史同期→未来外推。",
+      "evidence": "statement 含“未来”（leap_markers.future = [\"未来\"]）vs referenced_row_identity.lag = \"3\"，effect_down_rel_median = -0.06089045084249664（均为历史观测口径）",
+      "confidence": "medium"
+    },
+    {
+      "claim_label": "k2",
+      "item": "leap",
+      "note": "结论称“适用所有市场环境”“必然”，但被引证据只覆盖单一关系、单一 lag 的历史样本，疑似有限区间→普遍成立。",
+      "evidence": "statement 含“所有”“必然”（leap_markers.universal = [\"所有\", \"必然\"]）vs evidence 全部指向 relation_id = \"R01\"、lag = \"3\" 的同一行，n_up = \"922\"、n_down = \"798\"",
+      "confidence": "medium"
+    },
+    {
+      "claim_label": "k2",
+      "item": "wording",
+      "note": "结论把一个相对口径的中位效应描述为“系统性下跌”，措辞强度与被引效应量数值疑似不匹配。",
+      "evidence": "statement 含“系统性下跌”、verdict = \"必然\" vs evidence_magnitude_hints.effect_like: effect_down_rel_median = -0.06089045084249664（相对中位口径）",
+      "confidence": "medium"
+    }
+  ]
+}
