@@ -27,6 +27,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import verify_lineage as V
+import verify_conclusions as VC
 
 
 def build_deliverable(claims, results, source, out):
@@ -71,12 +72,65 @@ def build_blocked(results, source, out):
     lines.append(f"> 原始数据：`{source}` ｜ 待核声明：{len(results)}")
     lines.append(f"> 命中 {n_ok} ｜ **错位 {n_fail}** ｜ **无法验证 {n_warn}** ｜ 结论：FAIL\n")
     lines.append("## 未通过项（必须修正后重跑 emit.py）\n")
+    any_item = False
     for status, label, detail in results:
         if status != "ok":
+            any_item = True
             lines.append(f"- {V.ICON[status]} **{label}**：{detail}")
+    if not any_item:
+        lines.append("（机械对账层无问题；未通过项来自结论层，见下节）")
     lines.append("")
     lines.append(f"**交付文件 `{out}` 未写入。** 跳过校验的产出不允许落盘。")
     return "\n".join(lines)
+
+
+def _has_conclusions(claims_path):
+    """判断 claims 文件是否启用了结论层（顶层 conclusions 数组非空）。"""
+    try:
+        with open(claims_path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return False
+    if isinstance(raw, list):
+        raw = {"claims": raw}
+    if not isinstance(raw, dict):
+        return False
+    return bool(raw.get("conclusions"))
+
+
+def _run_conclusion_layer(claims_path, header, rows, claims, results):
+    """跑第 4 层，返回 (硬拦issues, 提示issues)。"""
+    try:
+        with open(claims_path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return [], []
+    if isinstance(raw, list):
+        raw = {"claims": raw}
+    conclusions = raw.get("conclusions") or []
+
+    ids_ok, dups = V.check_claim_ids(claims)
+    if not ids_ok:
+        return [("H1", f"claim id 重复: {sorted(set(dups))}（id 必须唯一）")], []
+
+    claims_by_id = {}
+    for c in claims:
+        cid = c.get("id")
+        if cid is not None:
+            claims_by_id[str(cid)] = c
+    claim_results = {}
+    for c, r in zip(claims, results):
+        claim_results[c.get("id")] = r[0]
+
+    hard, warn = [], []
+    for conc in conclusions:
+        issues = VC.check_conclusion(conc, claims_by_id, claim_results, header, rows)
+        for lvl, code, msg in issues:
+            if lvl == "fail":
+                hard.append((code, f"[{conc.get('id','(无id)')}] {msg}"))
+            else:
+                warn.append((code, f"[{conc.get('id','(无id)')}] {msg}"))
+    return hard, warn
 
 
 def main():
@@ -108,9 +162,26 @@ def main():
     n_warn = sum(1 for r in results if r[0] == "warn")
     verdict = "PASS" if (n_fail == 0 and n_warn == 0) else "FAIL"
 
+    # ── 第 4 层：结论链检查（若文件含 conclusions）────────────────
+    # 机械 FAIL 已确定拦截；这里追加结论层的硬拦项。
+    # 提示级（W1 裸数字）不拦截，只在交付件里留痕。
+    conc_report = None
+    if _has_conclusions(args.claims):
+        conc_issues, conc_warns = _run_conclusion_layer(args.claims, header, rows, claims, results)
+        if conc_issues:
+            verdict = "FAIL"
+            n_fail += len(conc_issues)
+            conc_report = conc_issues
+        if conc_warns:
+            n_warn += len(conc_warns)
+
     blocked_path = args.out + ".blocked.md"
     if verdict != "PASS":
         blocked = build_blocked(results, V.LAST_SOURCE_DESC, args.out)
+        if conc_report:
+            blocked += "\n## 结论层（第 4 层）未通过\n\n"
+            for code, msg in conc_report:
+                blocked += f"- ❌ **[{code}]** {msg}\n"
         with open(blocked_path, "w", encoding="utf-8") as f:
             f.write(blocked)
         print(f"❌ 闸门拦截：{n_fail} 错位 + {n_warn} 无法验证。")
