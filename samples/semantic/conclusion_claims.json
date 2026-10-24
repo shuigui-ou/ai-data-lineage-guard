@@ -1,0 +1,36 @@
+{
+  "claims": [
+    {"id": "e1", "label": "R01 下行样本量 n_down", "value": 798, "source": {"row": 1, "col": "n_down"}},
+    {"id": "e2", "label": "R01 效应量 cohen_d", "value": 0.31795219774112904, "source": {"row": 1, "col": "cohen_d"}},
+    {"id": "e3", "label": "R01 p 值 p_raw", "value": 2.9099284528449028e-11, "source": {"row": 1, "col": "p_raw"}},
+    {"id": "e4", "label": "R01 下行中位效应", "value": -0.06089045084249664, "source": {"row": 1, "col": "effect_down_rel_median"}},
+    {"id": "e5", "label": "全部关系条数", "value": 10, "derived": {"op": "countrows", "col": "relation_id"}}
+  ],
+  "conclusions": [
+    {
+      "id": "k1",
+      "type": "relational",
+      "statement": "CN_POWER_BOARD 对 CN_MARGIN_BALANCE 存在大幅且决定性的传导关系",
+      "verdict": "决定性",
+      "criterion": {"metric": "R01 下行样本量 n_down", "op": ">=", "value": 100, "source": "判定依据：下行样本量≥100"},
+      "evidence": ["e1", "e2", "e3"],
+      "stance": "support"
+    },
+    {
+      "id": "k2",
+      "type": "relational",
+      "statement": "该传导关系导致了下行市场的系统性下跌，未来会继续如此，适用所有市场环境",
+      "verdict": "必然",
+      "evidence": ["e3", "e4"],
+      "stance": "support"
+    },
+    {
+      "id": "k3",
+      "type": "relational",
+      "statement": "样本内该传导在当前窗口表现为下行方向的中位负向效应",
+      "verdict": "下行中位效应为负",
+      "evidence": ["e4"],
+      "stance": "support"
+    }
+  ]
+}
