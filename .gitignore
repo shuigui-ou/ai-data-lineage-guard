@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+*.zip
+_gh_payload.json
+trial/
