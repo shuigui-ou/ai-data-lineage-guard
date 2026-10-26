@@ -30,7 +30,12 @@ import verify_lineage as V
 import verify_conclusions as VC
 
 
-def build_deliverable(claims, results, source, out):
+def _md_cell(s):
+    """表格单元格转义：竖线与换行会毁掉 markdown 表格。"""
+    return str(s if s is not None else "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def build_deliverable(claims, results, source, out, conclusions=None, warns=None):
     n_ok = sum(1 for r in results if r[0] == "ok")
     n_fail = sum(1 for r in results if r[0] == "fail")
     n_warn = sum(1 for r in results if r[0] == "warn")
@@ -54,6 +59,30 @@ def build_deliverable(claims, results, source, out):
         else:
             ref_s = "—"
         lines.append(f"| {label} | {claim.get('value')} | {ref_s} | {V.ICON[status]} |")
+
+    # ── 结论段（v0.5.2 修正 A）──────────────────────────────────────
+    # 此前 build_deliverable 只渲染 claims 表，第 4 层校验完的结论一个字不落盘，
+    # 导致"简报必须有结论"与"只能由 emit 落盘"直接冲突。现在把结论渲染出来。
+    if conclusions:
+        lines.append("")
+        lines.append(f"## 结论（{len(conclusions)} 条，均已通过第 4 层证据链校验）\n")
+        lines.append("| # | 类型 | 结论 | 判定 | 证据 | 可核验性 |")
+        lines.append("|---|---|---|---|---|---|")
+        for c in conclusions:
+            ev = "、".join(str(x) for x in (c.get("evidence") or []))
+            verif = "人工判定（manual）" if c.get("verifiability") == "manual" else "可核验"
+            lines.append(
+                f"| {_md_cell(c.get('id'))} | {_md_cell(c.get('type'))} "
+                f"| {_md_cell(c.get('statement'))} | {_md_cell(c.get('verdict'))} "
+                f"| {_md_cell(ev)} | {verif} |"
+            )
+
+    if warns:
+        lines.append("")
+        lines.append(f"## 提示（{len(warns)} 条，不阻断落盘，建议人工复核）\n")
+        for code, msg in warns:
+            lines.append(f"- ⚠️ **[{code}]** {msg}")
+
     lines.append("")
     lines.append("---")
     lines.append("数值血缘戳：本文件由 emit.py 在通过 `verify_lineage` 对账后落盘，")
@@ -84,18 +113,23 @@ def build_blocked(results, source, out):
     return "\n".join(lines)
 
 
-def _has_conclusions(claims_path):
-    """判断 claims 文件是否启用了结论层（顶层 conclusions 数组非空）。"""
+def _load_conclusions(claims_path):
+    """读取顶层 conclusions 数组（无则返回 []）。"""
     try:
         with open(claims_path, encoding="utf-8") as f:
             raw = json.load(f)
     except Exception:
-        return False
+        return []
     if isinstance(raw, list):
-        raw = {"claims": raw}
+        return []
     if not isinstance(raw, dict):
-        return False
-    return bool(raw.get("conclusions"))
+        return []
+    return raw.get("conclusions") or []
+
+
+def _has_conclusions(claims_path):
+    """判断 claims 文件是否启用了结论层（顶层 conclusions 数组非空）。"""
+    return bool(_load_conclusions(claims_path))
 
 
 def _run_conclusion_layer(claims_path, header, rows, claims, results):
@@ -138,6 +172,10 @@ def main():
     ap.add_argument("--source", required=True, help="原始数据文件 (.csv/.json)")
     ap.add_argument("--claims", required=True, help="AI 产出 (json 清单 或 md/txt 行内标签)")
     ap.add_argument("--out", required=True, help="最终交付文件路径（仅 PASS 才写）")
+    ap.add_argument("--min-claims", type=int, default=0,
+                    help="覆盖率门槛：claims 至少 N 条（0=不检查；v0.5.2 修正 H）")
+    ap.add_argument("--min-conclusions", type=int, default=0,
+                    help="覆盖率门槛：conclusions 至少 N 条（0=不检查）")
     args = ap.parse_args()
 
     try:
@@ -164,9 +202,11 @@ def main():
 
     # ── 第 4 层：结论链检查（若文件含 conclusions）────────────────
     # 机械 FAIL 已确定拦截；这里追加结论层的硬拦项。
-    # 提示级（W1 裸数字）不拦截，只在交付件里留痕。
+    # 提示级（W1 裸数字）不拦截，但会写进交付件的「提示」段。
     conc_report = None
-    if _has_conclusions(args.claims):
+    conc_warns = []
+    conclusions = _load_conclusions(args.claims)
+    if conclusions:
         conc_issues, conc_warns = _run_conclusion_layer(args.claims, header, rows, claims, results)
         if conc_issues:
             verdict = "FAIL"
@@ -175,6 +215,15 @@ def main():
         if conc_warns:
             n_warn += len(conc_warns)
 
+    # ── 覆盖率门槛（v0.5.2 修正 H）：不达标即拦，避免"10 条 claim 的漂亮报告"过闸 ──
+    min_fail = []
+    if args.min_claims and len(claims) < args.min_claims:
+        min_fail.append(f"claims 数 {len(claims)} < 门槛 {args.min_claims}（覆盖率不足）")
+    if args.min_conclusions and len(conclusions) < args.min_conclusions:
+        min_fail.append(f"conclusions 数 {len(conclusions)} < 门槛 {args.min_conclusions}（覆盖率不足）")
+    if min_fail:
+        verdict = "FAIL"
+
     blocked_path = args.out + ".blocked.md"
     if verdict != "PASS":
         blocked = build_blocked(results, V.LAST_SOURCE_DESC, args.out)
@@ -182,17 +231,25 @@ def main():
             blocked += "\n## 结论层（第 4 层）未通过\n\n"
             for code, msg in conc_report:
                 blocked += f"- ❌ **[{code}]** {msg}\n"
+        if min_fail:
+            blocked += "\n## 覆盖率门槛未达标\n\n"
+            for m in min_fail:
+                blocked += f"- ❌ {m}\n"
         with open(blocked_path, "w", encoding="utf-8") as f:
             f.write(blocked)
         print(f"❌ 闸门拦截：{n_fail} 错位 + {n_warn} 无法验证。")
+        for m in min_fail:
+            print(f"   ❌ {m}")
         print(f"   交付文件 {args.out} 未写入。")
         print(f"   隔离报告已写：{blocked_path}（修正 claims 后重跑 emit.py）")
         sys.exit(1)
 
-    deliverable = build_deliverable(claims, results, V.LAST_SOURCE_DESC, args.out)
+    deliverable = build_deliverable(claims, results, V.LAST_SOURCE_DESC, args.out,
+                                    conclusions=conclusions, warns=conc_warns)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(deliverable)
-    print(f"✅ 校验通过（{len(results)} 条声明全命中），交付文件已落盘：{args.out}")
+    n_conc = f"，结论 {len(conclusions)} 条" if conclusions else ""
+    print(f"✅ 校验通过（{len(results)} 条声明全命中{n_conc}），交付文件已落盘：{args.out}")
     sys.exit(0)
 
 
