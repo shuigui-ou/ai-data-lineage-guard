@@ -188,12 +188,16 @@ def _load_parquet(p):
         raise ValueError("parquet 空表：无任何列")
 
     rows = []
+    empty_rows = 0
     try:
         for batch in pf.iter_batches(batch_size=4096):
             for d in batch.to_pylist():
                 row = {h: _parquet_cell(d.get(h)) for h in header}
                 if all(v == "" for v in row.values()):
-                    continue
+                    empty_rows += 1
+                # v0.5.2 修正 F：全空行**保留**。此前静默 continue 丢弃会让
+                # source.row 与物理行整体错位，而每条 claim 仍可能 PASS ——
+                # 那正是本工具最该防的"实体错位"，却成了隐性盲区。
                 rows.append(row)
     except Exception as e:
         raise ValueError(f"parquet 读取失败: {e}")
@@ -202,7 +206,11 @@ def _load_parquet(p):
         raise ValueError("parquet 空表：无任何行")
 
     n_rows_file = pf.metadata.num_rows
-    LAST_SOURCE_DESC = f"{p} (parquet: {len(header)} 列 x {n_rows_file} 行, 读取 {len(rows)} 行)"
+    align = ("物理行对齐" if len(rows) == n_rows_file
+             else f"⚠行号与物理行不一致(文件 {n_rows_file} 行/读取 {len(rows)} 行)")
+    empty_note = f", 含全空行 {empty_rows} 条(已保留以对齐)" if empty_rows else ""
+    LAST_SOURCE_DESC = (f"{p} (parquet: {len(header)} 列 x {n_rows_file} 行, "
+                        f"读取 {len(rows)} 行{empty_note}; {align})")
     return header, rows
 
 
@@ -239,17 +247,25 @@ def cell_value(header, rows, row, col):
 def _resolve_rows(rows_spec, n_rows):
     """把 rows 声明解析成 1-based 行号索引序列。
 
-    支持三种形态：
-      - None / 空            → 全部数据行
-      - "1-100" / "1 - 100"   → 连续闭区间
-      - [1,4,6,11] / "1,4,6,11" → 离散行集（试跑暴露的缺口：目标行常不连续）
+    支持形态（v0.5.2）：
+      - None / ""                  → 全部数据行
+      - []                         → **空子集（0 行）**（v0.5.2 修正 E：
+                                     此前 [] 被误当"全部行"，导致空子集无法表达）
+      - "1-100" / "1 - 100"        → 连续闭区间
+      - "41-829,1012-1034"         → 多区间并集（v0.5.2 新增；不连续行段无需逐个列举）
+      - [1,4,6,11] / "1,4,6,11"    → 离散行集
     离散行集是显式列举，不做任何"就近取整/补全"推断——标签写什么就核什么。
     """
-    if rows_spec in (None, "", []):
+    # None / 空串 = 全部行；空列表 = 空集（两者语义不同，不能合并判断）
+    if rows_spec is None:
+        return list(range(1, n_rows + 1))
+    if isinstance(rows_spec, str) and rows_spec.strip() == "":
         return list(range(1, n_rows + 1))
 
-    # 离散行集：真正的 list/tuple，或全数字的逗号串
+    # 离散行集：list/tuple（空列表 → 空集）
     if isinstance(rows_spec, (list, tuple)):
+        if len(rows_spec) == 0:
+            return []
         idxs = []
         for x in rows_spec:
             try:
@@ -259,27 +275,48 @@ def _resolve_rows(rows_spec, n_rows):
         return idxs
 
     s = str(rows_spec).strip()
-    if "," in s:
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    if not parts:
+        return []
+
+    # 多段（逗号）：每段可为 "a-b" 区间或单个行号 → 并集
+    if len(parts) > 1:
         idxs = []
-        for part in s.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                idxs.append(int(part))
-            except ValueError:
-                raise ValueError(f"离散行集含非法行号: {part!r}")
-        if not idxs:
-            raise ValueError(f"离散行集为空: {rows_spec!r}")
+        for part in parts:
+            m = re.match(r"^(\d+)\s*-\s*(\d+)$", part)
+            if m:
+                a, b = int(m.group(1)), int(m.group(2))
+                if a > b:
+                    raise ValueError(f"rows 区间首尾颠倒: {a}-{b}")
+                idxs.extend(range(a, b + 1))
+            else:
+                try:
+                    idxs.append(int(part))
+                except ValueError:
+                    raise ValueError(f"离散行集含非法行号: {part!r}")
         return idxs
 
     m = re.match(r"^(\d+)\s*-\s*(\d+)$", s)
     if not m:
-        raise ValueError(f"无法解析 rows 声明: {rows_spec!r}（支持 '1-100' / [1,4,6] / '1,4,6'）")
+        raise ValueError(f"无法解析 rows 声明: {rows_spec!r}"
+                         f"（支持 '1-100' / '41-829,1012-1034' / [1,4,6] / '1,4,6'）")
     a, b = int(m.group(1)), int(m.group(2))
     if a > b:
         raise ValueError(f"rows 区间首尾颠倒: {a}-{b}")
     return list(range(a, b + 1))
+
+
+def _is_null_cell(s):
+    """单元格是否为空值（v0.5.2 新增，供 nulls 算子用）。
+
+    只认"真空"：None / 空串 / 字面 None/null/NaN。
+    **不把"非数字文本"当空值** —— 否则对字符串列跑 nulls 会算出满列皆空，
+    语义完全错（"github" 不是空值，只是不是数字）。
+    """
+    if s is None:
+        return True
+    t = str(s).strip()
+    return t == "" or t.lower() in ("none", "null", "nan")
 
 
 def recompute(header, rows, op, col, rows_spec=None):
@@ -288,7 +325,11 @@ def recompute(header, rows, op, col, rows_spec=None):
     算子：
       sum / mean / count / min / max —— 只统计**可转数值**的值（count 数的是可转数值的个数）
       countrows                        —— 数**行数**（与列类型无关，字符串列也适用）
-    rows：None / "1-100" / [1,4,6] / "1,4,6"（见 _resolve_rows）
+      nulls                            —— 数**空值个数**（v0.5.2 新增；空串/None/null/NaN，
+                                          不把非数字文本算作空）
+      countdistinct                    —— 数**去重后的取值个数**（v0.5.2 新增；空值不计入；
+                                          数值按值归一，100 与 100.0 视为同一个）
+    rows：None / "" / [] / "1-100" / "41-829,1012-1034" / [1,4,6] / "1,4,6"（见 _resolve_rows）
     """
     if op == "countrows":
         # 行数算子：不要求 col 存在，但若给了 col 且不存在则显式报错（防笔误被静默放过）
@@ -303,10 +344,25 @@ def recompute(header, rows, op, col, rows_spec=None):
     if col not in header:
         raise KeyError(f"列不存在: {col}")
     idxs = _resolve_rows(rows_spec, len(rows))
-    vals = []
     for i in idxs:
         if i < 1 or i > len(rows):
             raise IndexError(f"行越界: {i} (共 {len(rows)} 数据行)")
+
+    if op == "nulls":
+        return float(sum(1 for i in idxs if _is_null_cell(rows[i - 1][col])))
+
+    if op == "countdistinct":
+        seen = set()
+        for i in idxs:
+            raw = rows[i - 1][col]
+            if _is_null_cell(raw):
+                continue
+            v = coerce_num(raw)
+            seen.add(("n", v) if v is not None else ("s", str(raw)))
+        return float(len(seen))
+
+    vals = []
+    for i in idxs:
         v = coerce_num(rows[i - 1][col])
         if v is not None:
             vals.append(v)
@@ -320,7 +376,7 @@ def recompute(header, rows, op, col, rows_spec=None):
         return min(vals) if vals else 0.0
     if op == "max":
         return max(vals) if vals else 0.0
-    raise ValueError(f"不支持的算子: {op}")
+    raise ValueError(f"不支持的算子: {op}（支持 sum/mean/count/min/max/countrows/nulls/countdistinct）")
 
 
 # ───────────────────────── 单条核对 ─────────────────────────
@@ -454,7 +510,10 @@ def main():
     ids_ok, dups = check_claim_ids(claims)
     if not ids_ok:
         print(f"❌ claim id 重复: {sorted(set(dups))}（id 必须唯一，否则结论引用有歧义）")
-        sys.exit(3)
+        # v0.5.2 修正 I：这是**产出内容缺陷**，不是环境/依赖问题。
+        # 此前误用 exit 3（"源加载失败或依赖缺失"），调用方会以为可重试，
+        # 实际必须改 claims 才能过 —— 语义上应为 FAIL(1)。
+        sys.exit(1)
 
     results = [check_claim(c, header, rows) for c in claims]
 
