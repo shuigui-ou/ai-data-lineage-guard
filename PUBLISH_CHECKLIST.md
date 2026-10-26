@@ -7,7 +7,7 @@
 - [ ] **③ 显示名称** —— `AI 数据核对`
 - [ ] **④ slug** —— `ai-data-lineage-guard`
 - [ ] **⑤ 描述** —— 见 `skillhub_meta.json` 的 `short_description` / `long_description`
-- [ ] **⑥ 分类/标签/版本** —— 分类 `开发工具`；版本 `0.3.1`；标签见 `skillhub_meta.json`
+- [ ] **⑥ 分类/标签/版本** —— 分类 `开发工具`；版本 `0.5.2`；标签见 `skillhub_meta.json`
 
 > ⚠️ **压缩包里不能含任何图片**（png/jpg/svg/ico 等二进制）。上传接口会拦截并报
 > 「不支持的文件类型」。图标必须在表单的「图标 → 自定义」处**单独上传**。
@@ -26,7 +26,7 @@
 ## 三、metadata 与 frontmatter 一致性
 
 - [x] `SKILL.md` frontmatter 含 `name / displayName / version / author / category / tags / summary / description / license / pricing / platforms / permission / dependency / trigger / icon`
-- [x] frontmatter 的 `version` = `skillhub_meta.json` 的 `version` = `0.3.1`
+- [x] frontmatter 的 `version` = `skillhub_meta.json` 的 `version` = `0.5.2`
 - [x] frontmatter 的 `displayName` = meta 的 `display_name`
 - [x] 两处 `category` 均为 `开发工具`
 - [x] 两处 `tags` 一致（8 个）
