@@ -99,6 +99,17 @@ def _need(path, why):
     return True
 
 
+def _skip(why):
+    """依赖缺失导致的跳过——必须计入 SKIPPED，否则"全绿"会掩盖"根本没跑"。
+
+    这是 v0.5.2 修的一个既有诚实性缺陷：此前各处用手写 print 报告缺 pyarrow，
+    没有 append 到 SKIPPED，于是缺依赖时仍显示 ✅ 计入通过数。
+    """
+    SKIPPED.append((why, why))
+    print(f"       （跳过：{why}）")
+    return False
+
+
 def t_lineage_xlsx():
     import verify_lineage as V
     if not _need("samples/data.xlsx", "发布包内不放 xlsx（二进制）"):
@@ -142,7 +153,7 @@ def t_parquet_equivalence():
     try:
         import pyarrow  # noqa
     except ImportError:
-        print("       （跳过：缺 pyarrow）")
+        _skip("缺 pyarrow")
         return
     import verify_lineage as V
     hc, rc = V.load_source("samples/source_sales.csv")
@@ -175,7 +186,7 @@ def t_parquet_types():
     try:
         import pyarrow  # noqa
     except ImportError:
-        print("       （跳过：缺 pyarrow）")
+        _skip("缺 pyarrow")
         return
     import verify_lineage as V
     h, rows = V.load_source("samples/types.parquet")
@@ -207,7 +218,7 @@ def t_parquet_corrupt():
     try:
         import pyarrow  # noqa
     except ImportError:
-        print("       （跳过：缺 pyarrow）")
+        _skip("缺 pyarrow")
         return
     code, out = run_module("verify_lineage.py",
                            ["--source", "samples/corrupt.parquet",
@@ -344,6 +355,199 @@ def t_build_dist_no_binary():
     assert "✅" in out, out
 
 
+# ───────────── v0.5.2 修复项回归（A–I）─────────────
+
+def _write_tmp(name, obj):
+    p = os.path.join(ROOT, "tests", name)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+    return p
+
+
+def t_fix_d_nulls_countdistinct():
+    """D：nulls / countdistinct 算子。"""
+    import verify_lineage as V
+    h, rows = V.load_source("samples/source_sales.csv")
+    assert V.recompute(h, rows, "countdistinct", "product") == 5.0
+    assert V.recompute(h, rows, "nulls", "product") == 0.0
+    # 字符串列的非数字文本不得被算成空值
+    assert V.recompute(h, rows, "nulls", "product") == 0.0
+    # 子集也支持
+    assert V.recompute(h, rows, "countdistinct", "product", [1, 1, 2]) == 2.0
+
+
+def t_fix_d2_nulls_parquet():
+    """D：parquet 中 None → 空值计数（需 pyarrow）。"""
+    try:
+        import pyarrow  # noqa
+    except ImportError:
+        _skip("缺 pyarrow")
+        return
+    if not _need("samples/types.parquet", "发布包内不放 parquet（二进制）"):
+        return
+    import verify_lineage as V
+    h, rows = V.load_source("samples/types.parquet")
+    assert V.recompute(h, rows, "nulls", "note") == 1.0      # 乙的 note=None
+    assert V.recompute(h, rows, "countdistinct", "name") == 2.0
+
+
+def t_fix_e_rows_empty_and_multi():
+    """E：[] = 空集（不再当全行）；多区间串支持。"""
+    import verify_lineage as V
+    h, rows = V.load_source("samples/source_sales.csv")   # 5 行，amount 100/250/300/150/200
+    assert V.recompute(h, rows, "sum", "amount", []) == 0.0
+    assert V.recompute(h, rows, "countrows", "id", []) == 0.0
+    assert V.recompute(h, rows, "sum", "amount", "1-3,5") == 100.0 + 250.0 + 300.0 + 200.0
+    assert V.recompute(h, rows, "countrows", "id", "1-3,5") == 4.0
+    # None / "" 仍表示全部行
+    assert V.recompute(h, rows, "countrows", "id", None) == 5.0
+    assert V.recompute(h, rows, "countrows", "id", "") == 5.0
+
+
+def t_fix_f_parquet_keeps_empty_rows():
+    """F：全空行必须保留，行号与物理行对齐（不再静默丢弃）。"""
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        _skip("缺 pyarrow")
+        return
+    import verify_lineage as V
+    tbl = pa.Table.from_pylist(
+        [{"a": 1, "b": "x"}, {"a": None, "b": None}, {"a": 3, "b": "z"}],
+        schema=pa.schema([("a", pa.int64()), ("b", pa.string())]))
+    p = os.path.join(ROOT, "tests", "_tmp_emptyrow.parquet")
+    pq.write_table(tbl, p)
+    try:
+        h, rows = V.load_source(p)
+        assert len(rows) == 3, f"全空行被丢弃了：{len(rows)}"          # 修复前会是 2
+        assert rows[1]["a"] == "" and rows[1]["b"] == ""                # 中间行保留位次
+        assert "全空行 1" in V.LAST_SOURCE_DESC, V.LAST_SOURCE_DESC
+        assert "物理行对齐" in V.LAST_SOURCE_DESC, V.LAST_SOURCE_DESC
+    finally:
+        os.remove(p)
+
+
+def t_fix_b_type_alias():
+    """B：中文 type 必须触发 manual 要求；未知 type 告警。"""
+    base = json.load(open("samples/conclusion/claims_positive.json", encoding="utf-8"))
+    # 中文"建议"且未标 manual → 必须硬拦（修复前会静默通过）
+    bad = json.loads(json.dumps(base))
+    bad["conclusions"][2]["type"] = "建议"
+    bad["conclusions"][2].pop("verifiability", None)
+    pb = _write_tmp("_tmp_type_bad.json", bad)
+    try:
+        code, out = run_module("verify_conclusions.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", pb])
+        assert code == 1, (code, out)
+        assert "H1" in out and "manual" in out, out
+    finally:
+        os.remove(pb)
+    # 标了 manual → 通过
+    good = json.loads(json.dumps(bad))
+    good["conclusions"][2]["verifiability"] = "manual"
+    pg = _write_tmp("_tmp_type_good.json", good)
+    try:
+        code, out = run_module("verify_conclusions.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", pg])
+        assert code == 0, (code, out)
+    finally:
+        os.remove(pg)
+    # 未知 type → 提示级告警，不硬拦
+    unknown = json.loads(json.dumps(base))
+    unknown["conclusions"][0]["type"] = "自定义类型"
+    pu = _write_tmp("_tmp_type_unknown.json", unknown)
+    try:
+        code, out = run_module("verify_conclusions.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", pu])
+        assert code == 0, (code, out)
+        assert "未知 type" in out, out
+    finally:
+        os.remove(pu)
+
+
+def t_fix_c_criterion_metric():
+    """C：criterion.metric 模糊匹配可过；匹配不上必须硬拦（不再静默 warn）。"""
+    base = json.load(open("samples/conclusion/claims_positive.json", encoding="utf-8"))
+    # 子串（去掉后缀 n_down）→ 归一化模糊匹配应命中
+    fuzzy = json.loads(json.dumps(base))
+    fuzzy["conclusions"][0]["criterion"]["metric"] = "R01 下行样本量"
+    pf = _write_tmp("_tmp_crit_fuzzy.json", fuzzy)
+    try:
+        code, out = run_module("verify_conclusions.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", pf])
+        assert code == 0, (code, out)
+    finally:
+        os.remove(pf)
+    # 完全对不上 → H3 硬拦
+    bogus = json.loads(json.dumps(base))
+    bogus["conclusions"][0]["criterion"]["metric"] = "完全不存在的指标"
+    pb = _write_tmp("_tmp_crit_bogus.json", bogus)
+    try:
+        code, out = run_module("verify_conclusions.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", pb])
+        assert code == 1, (code, out)
+        assert "H3" in out and "无法核验" in out, out
+    finally:
+        os.remove(pb)
+
+
+def t_fix_a_emit_renders_conclusions():
+    """A：emit 交付件必须包含结论段（修复前 0 条）。"""
+    outp = os.path.join(ROOT, "tests", "_tmp_emit_conc.md")
+    try:
+        code, out = run_module("emit.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", "samples/conclusion/claims_positive.json",
+                                "--out", outp])
+        assert code == 0, (code, out)
+        txt = open(outp, encoding="utf-8").read()
+        assert "## 结论" in txt, txt[:400]
+        assert "k1" in txt and "k3" in txt, "结论未渲染进交付件"
+        assert "人工判定（manual）" in txt, "manual 标注未渲染"
+    finally:
+        for p in (outp, outp + ".blocked.md"):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def t_fix_h_min_claims():
+    """H：覆盖率门槛不达标必须拦截。"""
+    outp = os.path.join(ROOT, "tests", "_tmp_emit_min.md")
+    try:
+        code, out = run_module("emit.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", "samples/conclusion/claims_positive.json",
+                                "--out", outp, "--min-claims", "100"])
+        assert code == 1, (code, out)
+        assert not os.path.exists(outp), "门槛未达标却落了盘"
+        blk = open(outp + ".blocked.md", encoding="utf-8").read()
+        assert "门槛" in blk, blk[:400]
+    finally:
+        for p in (outp, outp + ".blocked.md"):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def t_fix_i_duplicate_id_exit1():
+    """I：claim id 重复应 exit 1（内容缺陷），不再是 exit 3（环境类）。"""
+    dups = [{"id": "a", "label": "x", "value": 100, "source": {"row": 1, "col": "amount"}},
+            {"id": "a", "label": "y", "value": 100, "source": {"row": 1, "col": "amount"}}]
+    p = _write_tmp("_tmp_dup_id.json", {"claims": dups})
+    try:
+        code, out = run_module("verify_lineage.py",
+                               ["--source", "samples/source_sales.csv", "--claims", p])
+        assert code == 1, (code, out)
+        assert "重复" in out, out
+    finally:
+        os.remove(p)
+
+
 ALL_CASES = [
     ("第1层 机械对账 · csv", t_lineage_csv),
     ("第1层 机械对账 · 离散行集", t_lineage_discrete_rows),
@@ -363,6 +567,16 @@ ALL_CASES = [
     ("第3层 语义审计 · 清单外线索单列", t_semantic_finalize_offlist),
     ("第2层 emit · 落盘闸门", t_emit_gate),
     ("发布 · 打包无二进制", t_build_dist_no_binary),
+    # v0.5.2 修复项
+    ("修复D · nulls/countdistinct 算子", t_fix_d_nulls_countdistinct),
+    ("修复D · parquet 空值计数", t_fix_d2_nulls_parquet),
+    ("修复E · rows[]空集 + 多区间", t_fix_e_rows_empty_and_multi),
+    ("修复F · parquet 保留全空行", t_fix_f_parquet_keeps_empty_rows),
+    ("修复B · type 中文别名/未知告警", t_fix_b_type_alias),
+    ("修复C · criterion 模糊匹配/硬拦", t_fix_c_criterion_metric),
+    ("修复A · emit 渲染结论", t_fix_a_emit_renders_conclusions),
+    ("修复H · 覆盖率门槛", t_fix_h_min_claims),
+    ("修复I · 重复id exit1", t_fix_i_duplicate_id_exit1),
 ]
 
 
