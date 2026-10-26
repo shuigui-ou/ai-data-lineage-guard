@@ -1,7 +1,7 @@
 {
   "display_name": "AI 数据核对",
   "slug": "ai-data-lineage-guard",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "category": "开发工具",
   "tags": [
     "数据核对",
