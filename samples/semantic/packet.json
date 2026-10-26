@@ -1,6 +1,6 @@
 {
   "_doc": "语义审计备料包。本包只做确定性备料，不含任何判断结论。",
-  "generated_at": "2026-10-24 17:05:48",
+  "generated_at": "2026-10-26 10:46:56",
   "source": "samples\\conclusion\\relations_source.json",
   "n_rows": 10,
   "header": [
