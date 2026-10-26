@@ -12,9 +12,12 @@ verify_conclusions.py — 第 4 层：结论链检查（结论 ↔ 证据链）
     H2 数值矛盾：结论里的数字与被引证据矛盾
     H3 阈值矛盾：自称满足 criterion 但实际不满足
     H4 方向矛盾：结论声称方向与证据显式声明方向矛盾
-  提示（⚠️，第一版不硬拦，因误报率高）：
-    W1 裸数字：结论里的数字在被引证据中找不到
-        → 只在 basis 内较严；statement 内放过。实测误报率 <10% 后才考虑升级。
+  提示（⚠️，不硬拦；emit.py 也不因它拦截，只在交付件留痕）：
+    W1 裸数字：结论里的数字在被引证据中找不到对应值
+        v0.5.2 修正 G（注释与实现此前相反）：
+          · **statement 与 basis 都会被扫描**（原注释写"statement 内放过"，与代码不符）；
+          · 结构性叙述数字（年份/序数/季度/窗口/约数倍数）由词法白名单放过；
+          · 提示级不阻断落盘，但会列进交付件的「提示」段，供人工复核。
 
   不查：
     · 因果/建议/预测类结论的真伪（无 ground truth）
@@ -50,6 +53,50 @@ DOWN_WORDS = ["下降", "下跌", "走低", "减弱", "减少", "负相关", "�
 GROUP_CONTEXT = ["样本", "样本量", "分组", "组内", "区间", "情形", "情况下", "上行样本", "下行样本"]
 # 明确的效应/变化量修饰 → 方向词有效
 EFFECT_CONTEXT = ["效应", "影响", "变化", "变动", "偏移", "弹性", "反应", "收益", "响应"]
+
+# ───────────────── 结论类型枚举（v0.5.2 修正 B）─────────────────
+# 背景：原实现只认英文 ("causal","recommend","forecast")，写中文"建议"会**静默绕过**
+# verifiability="manual" 检查 —— 而 SKILL.md 通篇用中文，陌生人必踩。
+# 现在：中英别名统一归一；未知类型显式告警（不再静默）。
+UNVERIFIABLE_TYPES = {
+    # 因果
+    "causal", "causality", "cause", "因果", "因果性", "因果类",
+    # 建议 / 对策
+    "recommend", "recommendation", "suggest", "suggestion", "advice",
+    "建议", "推荐", "对策", "主张",
+    # 预测 / 展望
+    "forecast", "prediction", "predict", "predictive",
+    "预测", "推测", "预判", "展望",
+}
+VERIFIABLE_TYPES = {
+    "descriptive", "描述", "描述性",
+    "factual", "fact", "事实", "事实性",
+    "relational", "关系", "关系性",
+    "comparative", "comparison", "比较", "对比",
+    "caveat", "注意事项", "局限", "边界", "说明",
+    "observation", "观察", "note", "备注",
+    "summary", "摘要", "汇总",
+}
+
+
+def _norm_key(s):
+    """把 label / metric 归一成可比较的键：去空白与常见标点、转小写。"""
+    if s is None:
+        return ""
+    return re.sub(r"[\s_\-（）()\[\]【】{}:：,，.。/／、|]+", "", str(s)).lower()
+
+
+def normalize_type(ctype):
+    """类型归一：去空白、转小写。返回 (norm, kind)。
+
+    kind ∈ {"unverifiable", "verifiable", "unknown"}。
+    """
+    norm = str(ctype or "").strip().lower()
+    if norm in UNVERIFIABLE_TYPES:
+        return norm, "unverifiable"
+    if norm in VERIFIABLE_TYPES:
+        return norm, "verifiable"
+    return norm, "unknown"
 
 
 def detect_direction(text):
@@ -279,19 +326,38 @@ def check_conclusion(conc, claims_by_id, claim_results, header, rows):
         metric = crit.get("metric")
         op = crit.get("op")
         target = crit.get("value")
-        # metric 指向某个 evidence claim 的 label
+        # metric 指向某个 evidence claim 的 label 或 id。
+        # v0.5.2 修正 C：
+        #   · 先精确匹配（去空白/标点/大小写后归一），再子串宽松匹配；
+        #   · **仍匹配不上 → 硬拦**（此前只 warn，等于"阈值没被核验"静默通过，
+        #     与"criterion 必须带 source 防宽阈值"的初衷背离）。
+        metric_key = _norm_key(metric)
         metric_val = None
-        for ev in evidence:
-            c = claims_by_id.get(ev)
-            if c and (c.get("label") == metric or c.get("id") == metric):
-                mv = V.coerce_num(c.get("value"))
-                if mv is not None:
-                    metric_val = mv
-                    break
+        if metric_key:
+            for ev in evidence:
+                c = claims_by_id.get(ev)
+                if not c:
+                    continue
+                if _norm_key(c.get("label")) == metric_key or _norm_key(c.get("id")) == metric_key:
+                    mv = V.coerce_num(c.get("value"))
+                    if mv is not None:
+                        metric_val = mv
+                        break
+            if metric_val is None:
+                for ev in evidence:
+                    c = claims_by_id.get(ev)
+                    if not c:
+                        continue
+                    lab_key = _norm_key(c.get("label"))
+                    if lab_key and (metric_key in lab_key or lab_key in metric_key):
+                        mv = V.coerce_num(c.get("value"))
+                        if mv is not None:
+                            metric_val = mv
+                            break
         if metric_val is None:
-            issues.append(("warn", "H3",
-                           f"criterion 的 metric='{metric}' 未匹配到任何 evidence claim 的值"
-                           f"（无法核验阈值，仅提示）"))
+            issues.append(("fail", "H3",
+                           f"criterion 的 metric='{metric}' 未匹配到任何 evidence claim 的 "
+                           f"label/id，阈值无法核验（不得静默通过；请把 metric 写成被引 claim 的 label 或 id）"))
         elif op and target is not None:
             res = _criterion_op(op, metric_val, V.coerce_num(target))
             if res is False:
@@ -330,7 +396,9 @@ def check_conclusion(conc, claims_by_id, claim_results, header, rows):
         if c:
             ev_vals |= collect_evidence_values(c, header, rows)
 
-    def scan_numbers(field_name, text, strict):
+    def scan_numbers(field_name, text):
+        """扫描字段里的数字。statement 与 basis 用同一套规则（v0.5.2 修正 G：
+        删掉从未被使用的 strict 形参，注释与行为对齐——两处都扫）。"""
         for raw, val, ns, ne in extract_numbers(text):
             # -- 词法白名单：结构性叙述数字不参与 H2/W1（v0.5.0）--
             # 必须在比对之前判：否则“第 800 名”这类数字会因与证据 798 接近而被
@@ -370,15 +438,20 @@ def check_conclusion(conc, claims_by_id, claim_results, header, rows):
                            f"{field_name} 中的数字 {raw} 在被引证据中找不到对应值"
                            f"（疑似无出处；第一版为提示级）"))
 
-    scan_numbers("statement", statement, strict=False)
-    scan_numbers("basis", json.dumps(basis, ensure_ascii=False) if basis else "", strict=True)
+    scan_numbers("statement", statement)
+    scan_numbers("basis", json.dumps(basis, ensure_ascii=False) if basis else "")
 
-    # ── 因果/建议/预测类：必须显式标 manual ─────────
-    if ctype in ("causal", "recommend", "forecast"):
+    # ── 因果/建议/预测类：必须显式标 manual（v0.5.2 中英别名，未知类型告警）──
+    _norm, kind = normalize_type(ctype)
+    if kind == "unverifiable":
         if conc.get("verifiability") != "manual":
             issues.append(("fail", "H1",
-                           f"type='{ctype}' 必须显式标注 verifiability='manual'"
-                           f"（不可核验的结论不得伪装成可核验的）"))
+                           f"type='{ctype}' 属因果/建议/预测类，必须显式标注 "
+                           f"verifiability='manual'（不可核验的结论不得伪装成可核验的）"))
+    elif kind == "unknown":
+        issues.append(("warn", "H1-W",
+                       f"未知 type='{ctype}'，无法判断是否属不可核验类型；"
+                       f"若含因果/建议/预测含义请改用规范取值或标 verifiability='manual'"))
 
     return issues
 
