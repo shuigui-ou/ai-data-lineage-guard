@@ -83,7 +83,8 @@
         "metric": "R01 下行样本量 n_down",
         "op": ">=",
         "value": 100,
-        "source": "判定依据：下行样本量≥100（依据已核验 claim c1）"
+        "source": "判定依据：下行样本量≥100（依据已核验 claim c1）",
+        "tier": "disclosed"
       },
       "evidence": [
         "c1",
