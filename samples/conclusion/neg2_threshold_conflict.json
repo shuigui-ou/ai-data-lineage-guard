@@ -74,7 +74,8 @@
         "metric": "全部关系条数",
         "op": ">=",
         "value": 100,
-        "source": "判定依据：总关系数≥100"
+        "source": "判定依据：总关系数≥100",
+        "tier": "disclosed"
       },
       "evidence": [
         "c7"
