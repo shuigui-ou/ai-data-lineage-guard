@@ -548,6 +548,57 @@ def t_fix_i_duplicate_id_exit1():
         os.remove(p)
 
 
+def t_fix_a_tier_three_buckets():
+    """A：criterion 三桶——grounded/disclosed 不报 W2；未声明 tier 报 W2 并入未交代桶。"""
+    code, out = run_module("verify_conclusions.py",
+                           ["--source", "samples/conclusion/relations_source.json",
+                            "--claims", "samples/conclusion/claims_tier_demo.json"])
+    assert code == 0, (code, out)
+    # 只有 c_undisclosed（缺 tier）报 W2；grounded/disclosed 不报
+    assert out.count("未声明 tier") == 1, out
+    assert "[c_undisclosed]" in out, out
+
+
+def t_fix_c_emit_judgment_ledger():
+    """C：emit 交付件须含判定账三桶统计（1 有据 / 1 已交代·不可核 / 1 未交代）。"""
+    outp = os.path.join(ROOT, "tests", "_tmp_emit_ledger.md")
+    try:
+        code, out = run_module("emit.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", "samples/conclusion/claims_tier_demo.json",
+                                "--out", outp])
+        assert code == 0, (code, out)
+        txt = open(outp, encoding="utf-8").read()
+        assert "判定账" in txt, txt
+        for key in ("有据 (grounded)", "已交代·不可核 (disclosed)", "未交代 (undisclosed)"):
+            line = [l for l in txt.splitlines() if key in l and l.strip().startswith("|")]
+            assert line, (key, txt[:600])
+            assert "| 1 |" in line[0], (key, line[0])
+    finally:
+        for p in (outp, outp + ".blocked.md"):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def t_fix_b_source_audit():
+    """B：emit 交付件须含源数据自检段（源指纹 + 行列数）。"""
+    outp = os.path.join(ROOT, "tests", "_tmp_emit_audit.md")
+    try:
+        code, out = run_module("emit.py",
+                               ["--source", "samples/conclusion/relations_source.json",
+                                "--claims", "samples/conclusion/claims_positive.json",
+                                "--out", outp])
+        assert code == 0, (code, out)
+        txt = open(outp, encoding="utf-8").read()
+        assert "## 源数据自检" in txt, txt
+        assert "源指纹(sha256" in txt, txt
+        assert "数据行 ×" in txt, txt
+    finally:
+        for p in (outp, outp + ".blocked.md"):
+            if os.path.exists(p):
+                os.remove(p)
+
+
 ALL_CASES = [
     ("第1层 机械对账 · csv", t_lineage_csv),
     ("第1层 机械对账 · 离散行集", t_lineage_discrete_rows),
@@ -577,6 +628,9 @@ ALL_CASES = [
     ("修复A · emit 渲染结论", t_fix_a_emit_renders_conclusions),
     ("修复H · 覆盖率门槛", t_fix_h_min_claims),
     ("修复I · 重复id exit1", t_fix_i_duplicate_id_exit1),
+    ("v0.6 · A criterion 三桶分层", t_fix_a_tier_three_buckets),
+    ("v0.6 · C emit 判定账覆盖率", t_fix_c_emit_judgment_ledger),
+    ("v0.6 · B 源数据自检段", t_fix_b_source_audit),
 ]
 
 
