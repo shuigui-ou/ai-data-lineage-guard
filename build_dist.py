@@ -4,6 +4,7 @@
 build_dist.py — 打包成可上传 SkillHub 的 zip（纯文本，无图片/无二进制）
 
 规则（对齐已发布 skill 的实测口径）：
+  · **扁平输出**：包根即 SKILL.md（不含顶层目录），与 CLI 发布包一致；否则 SkillHub 识别不到技能
   · zip 内**禁止任何图片/二进制**（png/jpg/ico/xlsx/parquet 等），否则上传报「不支持的文件类型」
   · 点文件（.gitignore/.DS_Store）也不放进去
   · skillhub_meta.json 随包自带（纯文本），供填表复制
@@ -68,7 +69,8 @@ def main():
             if _is_runtime_artifact(rel):
                 skipped.append(str(rel) + "  (运行时产物/测试残留)")
                 continue
-            z.write(p, arcname=f"ai-data-lineage-guard/{rel.as_posix()}")
+            # 扁平输出：包根即 SKILL.md（去掉顶层目录），与 CLI 发布包一致
+            z.write(p, arcname=rel.as_posix())
             included.append(str(rel))
 
     size_kb = OUT.stat().st_size / 1024
