@@ -35,7 +35,7 @@ def _md_cell(s):
     return str(s if s is not None else "").replace("|", "\\|").replace("\n", " ").strip()
 
 
-def build_deliverable(claims, results, source, out, conclusions=None, warns=None):
+def build_deliverable(claims, results, source, out, conclusions=None, warns=None, audit=None):
     n_ok = sum(1 for r in results if r[0] == "ok")
     n_fail = sum(1 for r in results if r[0] == "fail")
     n_warn = sum(1 for r in results if r[0] == "warn")
@@ -77,6 +77,67 @@ def build_deliverable(claims, results, source, out, conclusions=None, warns=None
                 f"| {_md_cell(ev)} | {verif} |"
             )
 
+    # ── 判定账（v0.6，移植自推演系统 judgment ledger）──────────────
+    # 把"人为阈值"从"静默自洽通过"升级为"显式披露"：统计每条 criterion 的 tier 分布，
+    # 使 PASS 不再显得"全部有据"。机器只查是否诚实标注，不查外部标准是否真实存在。
+    if conclusions:
+        grounded = disclosed = undisclosed = 0
+        for c in conclusions:
+            crit = c.get("criterion") or c.get("threshold")
+            if not crit:
+                continue
+            raw_tier = crit.get("tier")
+            tier = VC.TIER_ALIASES.get(str(raw_tier).strip().lower()) if raw_tier is not None else None
+            if tier == VC.TIER_GROUNDED:
+                grounded += 1
+            elif tier == VC.TIER_DISCLOSED:
+                disclosed += 1
+            else:
+                undisclosed += 1
+        total = grounded + disclosed + undisclosed
+        if total:
+            lines.append("")
+            lines.append("## 判定账（阈值依据诚实披露）\n")
+            lines.append(f"> 本简报共 {total} 条带阈值的结论，其判定依据分布如下。"
+                         f"机器只查是否诚实标注，不查外部标准是否真实存在。")
+            lines.append("")
+            lines.append("| 桶 | 含义 | 条数 |")
+            lines.append("|---|---|---|")
+            lines.append(f"| 有据 (grounded) | 阈值来自外部可独立核验标准，且 source 写明 | {grounded} |")
+            lines.append(f"| 已交代·不可核 (disclosed) | 人为设定 / 经验阈值，已诚实声明无外部依据 | {disclosed} |")
+            lines.append(f"| 未交代 (undisclosed) | 未声明 tier 或 tier 非法，阈值合理性无法判定 | {undisclosed} |")
+            if undisclosed:
+                lines.append("")
+                lines.append(f"⚠️ 有 {undisclosed} 条结论的阈值**未交代依据**（已计入『未交代』桶），"
+                             f"建议人工补标 `grounded`（外部可核标准）或 `disclosed`（人为设定已承认）。")
+
+    # ── 源数据自检（v0.6 修正 B，对标推演系统 corpus_defects）────
+    # 信息性披露：源指纹 + 空值分布，使"盲信源文件"变为"显式披露源质量"。
+    if audit:
+        lines.append("")
+        lines.append("## 源数据自检\n")
+        lines.append(f"> 源指纹(sha256 前 12 位)：`{audit['fingerprint']}` ｜ "
+                     f"{audit['n_rows']} 数据行 × {audit['n_cols']} 列")
+        # v0.6 压力测试修正 B2：只要有任何列检出空值，就**列出全部列**（含 0% 的），
+        # 避免「只列非零列」导致哨兵空值列被整体隐去、反而给人「干净」的错觉。
+        any_null = any(c[1] > 0 for c in audit["col_nulls"])
+        if any_null:
+            lines.append("")
+            lines.append("| 列 | 空值数 | 空值占比 |")
+            lines.append("|---|---|---|")
+            for h, n_null, p in audit["col_nulls"]:
+                mark = " ⚠️" if n_null > 0 else ""
+                lines.append(f"| {h} | {n_null} | {p * 100:.1f}%{mark} |")
+            lines.append("")
+            lines.append("⚠️ 带 ⚠️ 的列含空值——核对涉及这些列的 claim 时，请确认空值已被正确排除或说明。")
+            lines.append("")
+            lines.append("> 空值识别基于已知缺失占位符集合（空串 / nan / null / none / n/a / na / nil / "
+                         "无 / 空 / 缺 / 缺失 / 未知 / 不详 / ? / - / — 等，已忽略首尾空白）。"
+                         "若源使用其他占位符（如自定义代码），可能未被识别为缺失，请人工核对。")
+        else:
+            lines.append("")
+            lines.append("✅ 所有列均无空值。")
+
     if warns:
         lines.append("")
         lines.append(f"## 提示（{len(warns)} 条，不阻断落盘，建议人工复核）\n")
@@ -111,6 +172,49 @@ def build_blocked(results, source, out):
     lines.append("")
     lines.append(f"**交付文件 `{out}` 未写入。** 跳过校验的产出不允许落盘。")
     return "\n".join(lines)
+
+
+# 空值识别（v0.6 压力测试修正 B2）：覆盖常见缺失占位符，避免哨兵空值被当真值漏报；
+# 同时忽略首尾空白，并对 float NaN 兜底。
+_NULL_TOKENS = {
+    "", "nan", "null", "none", "n/a", "n.a", "na", "nil", "无", "空", "缺", "缺失",
+    "未知", "不详", "?", "-", "—", "--", "tbd", "tba", "unknown",
+    "无数据", "空值", "未提供", "暂无", "missing",
+}
+def _is_null(v):
+    if v is None:
+        return True
+    try:
+        if isinstance(v, float) and v != v:  # NaN
+            return True
+    except TypeError:
+        pass
+    s = str(v).strip()
+    if s == "":
+        return True
+    s = s.lower().rstrip(".").rstrip("/")  # 容忍尾点/尾斜杠：N.A.→n.a、N/A/→n/a
+    if s in _NULL_TOKENS:
+        return True
+    return False
+
+
+def _audit_source(path, header, rows):
+    """轻量源自检（v0.6 修正 B，对标推演系统 corpus_defects）。
+    信息性，不阻断：披露源指纹与空值分布，使'盲信源文件'变为'显式披露源质量'。
+    """
+    import hashlib
+    try:
+        with open(path, "rb") as fh:
+            fingerprint = hashlib.sha256(fh.read()).hexdigest()[:12]
+    except Exception:
+        fingerprint = "n/a"
+    n = len(rows)
+    col_nulls = []
+    for h in header:
+        nulls = sum(1 for r in rows if _is_null(r.get(h)))
+        col_nulls.append((h, nulls, (nulls / n) if n else 0.0))
+    return {"n_rows": n, "n_cols": len(header),
+            "fingerprint": fingerprint, "col_nulls": col_nulls}
 
 
 def _load_conclusions(claims_path):
@@ -206,6 +310,7 @@ def main():
     conc_report = None
     conc_warns = []
     conclusions = _load_conclusions(args.claims)
+    audit = _audit_source(args.source, header, rows)
     if conclusions:
         conc_issues, conc_warns = _run_conclusion_layer(args.claims, header, rows, claims, results)
         if conc_issues:
@@ -245,7 +350,7 @@ def main():
         sys.exit(1)
 
     deliverable = build_deliverable(claims, results, V.LAST_SOURCE_DESC, args.out,
-                                    conclusions=conclusions, warns=conc_warns)
+                                    conclusions=conclusions, warns=conc_warns, audit=audit)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(deliverable)
     n_conc = f"，结论 {len(conclusions)} 条" if conclusions else ""
