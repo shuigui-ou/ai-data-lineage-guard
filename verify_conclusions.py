@@ -78,6 +78,22 @@ VERIFIABLE_TYPES = {
     "summary", "摘要", "汇总",
 }
 
+# ───────────────── criterion tier（v0.6 三桶分层，移植自 scenario-sim 判定账）─────────────────
+# 背景：v0.5.2 自承"自声明阈值可被放宽以规避，机器只查自洽不查合理性"。
+# 新版推演系统用"有据 / 已交代·不可核 / 未交代"三桶，把"人为阈值"诚实标出而非静默通过。
+# 本 skill 移植该思路：criterion 必须声明 tier，机器**只查是否诚实标注**，
+# 不查外部标准是否真实存在（无领域标准库，那需要另一条独立线）。
+TIER_GROUNDED = "grounded"        # 有据：阈值来自外部可独立核验标准，且 source 写明
+TIER_DISCLOSED = "disclosed"      # 已交代·不可核：人为设定 / 经验阈值，作者已诚实声明无外部依据
+TIER_UNDISCLOSED = "undisclosed"  # 未交代（兜底）
+TIER_ALIASES = {
+    "grounded": TIER_GROUNDED, "有据": TIER_GROUNDED, "有据可核": TIER_GROUNDED, "可核": TIER_GROUNDED,
+    "disclosed": TIER_DISCLOSED, "已交代": TIER_DISCLOSED, "已交代不可核": TIER_DISCLOSED,
+    "不可核": TIER_DISCLOSED, "人为": TIER_DISCLOSED, "经验阈值": TIER_DISCLOSED, "主观": TIER_DISCLOSED,
+}
+# 注：不再把"undisclosed/未交代"列为合法别名——"未交代"桶严格对应
+#     "未声明 tier 或 tier 非法"，这样用户无法用"未交代"标签绕过 W2 提示。
+
 
 def _norm_key(s):
     """把 label / metric 归一成可比较的键：去空白与常见标点、转小写。"""
@@ -198,6 +214,14 @@ def classify_descriptive_number(text, raw, val, start, end):
     after = text[end:end + 10]
     before = text[max(0, start - 10):start]
 
+    # R0 标识符/版本号内数字：v0.6 / R2 / k3 / W2 / pH7 等。
+    #   数字紧邻一个拉丁字母（无分隔符）→ 它是标签/版本/编号的一部分，不是测量值。
+    #   测量值不会以"字母+数字"无分隔形式出现（pH/T 等本身也是带标签读数，放行更安全）。
+    #   自然覆盖并先于 R1（Q2/q3 既是季度标签也是标识符，放行均正确）；
+    #   不影响中文前缀的序数（"第2"的 prv="第" 非 ascii，走 R3）。
+    if prv and prv.isascii() and prv.isalpha():
+        return "标识符/版本号内数字"
+
     # R1 季度标签：Q2 / q3 —— 前一字符是 Q/q
     if prv in ("Q", "q") and len(raw) == 1 and raw.isdigit() and raw in "1234":
         return "季度标签"
@@ -211,6 +235,15 @@ def classify_descriptive_number(text, raw, val, start, end):
         if prv in ("至", "到", "~", "～", "-", "—") and nxt in _WHITELIST_RANGE_NEXT \
                 and 1900 <= val <= 2099:
             return "年份区间"
+
+    # R2b 裸年份：4 位整数 1000–2999，且下一非空格字符不是计数/量词、也不是数字。
+    #   补 R2 的空缺：Cohen(2013) 这类括号里的年份，无"年/至/到"上下文也被放过。
+    #   但若紧跟计数/量词（"1563 家""2013 例"）→ 视为实体计数，不放行（真测量值必须仍报）。
+    #   下一字符是数字则视为更长数字的一部分（如 12000 仍当计数），不放行。
+    _COUNTER = set("家个名例次人元股吨条项起户所笔份位宗件")
+    if (float(val).is_integer() and 1000 <= val <= 2999
+            and not nxt.isdigit() and nxt not in _COUNTER):
+        return "年份(裸)"
 
     # R3 序数/排名：第 2 季度 / 前 5 名
     if prv in _WHITELIST_ORDINAL_PREV and float(val).is_integer() and 1 <= val <= 999:
@@ -313,13 +346,24 @@ def check_conclusion(conc, claims_by_id, claim_results, header, rows):
             issues.append(("fail", "H1",
                            f"引用了未通过机械对账的证据 '{ev}'（该 claim 状态 {st}）"))
 
-    # ── criterion 必带 source（修正 2 的留痕要求）────────────
+    # ── criterion 必带 source + 三桶 tier（v0.6，移植自推演系统判定账）────
     crit = conc.get("criterion") or conc.get("threshold")
     if crit:
         if not crit.get("source"):
             issues.append(("fail", "H1",
                            "criterion 缺 source 字段（判定依据必须留痕可审，"
                            "否则宽阈值可被无声放宽）"))
+        else:
+            # 有 source 但没声明 tier → 未交代（提示级 W2，不硬拦，计入判定账）
+            # 注：机器只查"是否诚实标注"，不查外部标准是否真实存在（无领域标准库）。
+            raw_tier = crit.get("tier")
+            tier = TIER_ALIASES.get(str(raw_tier).strip().lower()) if raw_tier is not None else None
+            if tier is None:
+                issues.append(("warn", "W2",
+                               f"criterion 未声明 tier（合法取值：{TIER_GROUNDED} 有据 / "
+                               f"{TIER_DISCLOSED} 已交代·不可核），无法判定阈值合理性；"
+                               f"已计入判定账『未交代』。来自外部可核标准请标 grounded，"
+                               f"为人为主观设定请标 disclosed"))
 
     # ── H3 阈值一致性 ─────────────────────────────
     if crit:
