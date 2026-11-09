@@ -74,7 +74,8 @@
         "metric": "R01 下行样本量 n_down",
         "op": ">=",
         "value": 100,
-        "source": "依据 claim c1"
+        "source": "依据 claim c1",
+        "tier": "disclosed"
       },
       "evidence": [
         "c1"
