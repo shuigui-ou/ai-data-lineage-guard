@@ -1,8 +1,32 @@
 {
   "claims": [
-    {"id": "c1", "label": "R01 下行样本量 n_down", "value": 798, "source": {"row": 1, "col": "n_down"}},
-    {"id": "c2", "label": "R01 上行样本量 n_up", "value": 922, "source": {"row": 1, "col": "n_up"}},
-    {"id": "c3", "label": "R01 效应量 cohen_d", "value": 0.31795219774112904, "source": {"row": 1, "col": "cohen_d"}}
+    {
+      "id": "c1",
+      "label": "R01 下行样本量 n_down",
+      "value": 798,
+      "source": {
+        "row": 1,
+        "col": "n_down"
+      }
+    },
+    {
+      "id": "c2",
+      "label": "R01 上行样本量 n_up",
+      "value": 922,
+      "source": {
+        "row": 1,
+        "col": "n_up"
+      }
+    },
+    {
+      "id": "c3",
+      "label": "R01 效应量 cohen_d",
+      "value": 0.31795219774112904,
+      "source": {
+        "row": 1,
+        "col": "cohen_d"
+      }
+    }
   ],
   "conclusions": [
     {
@@ -14,9 +38,13 @@
         "metric": "R01 下行样本量 n_down",
         "op": ">=",
         "value": 100,
-        "source": "判定依据：下行样本量≥100（依据已核验 claim c1）"
+        "source": "判定依据：下行样本量≥100（依据已核验 claim c1）",
+        "tier": "disclosed"
       },
-      "evidence": ["c1", "c2"],
+      "evidence": [
+        "c1",
+        "c2"
+      ],
       "stance": "support"
     },
     {
@@ -28,9 +56,13 @@
         "metric": "R01 上行样本量 n_up",
         "op": ">=",
         "value": 100,
-        "source": "判定依据：上行样本量≥100（依据已核验 claim c2）"
+        "source": "判定依据：上行样本量≥100（依据已核验 claim c2）",
+        "tier": "disclosed"
       },
-      "evidence": ["c2", "c3"],
+      "evidence": [
+        "c2",
+        "c3"
+      ],
       "stance": "support"
     },
     {
@@ -42,9 +74,12 @@
         "metric": "R01 效应量 cohen_d",
         "op": ">=",
         "value": 0.3,
-        "source": "判定依据：效应量≥0.3（依据已核验 claim c3）"
+        "source": "判定依据：效应量≥0.3（依据已核验 claim c3）",
+        "tier": "disclosed"
       },
-      "evidence": ["c3"],
+      "evidence": [
+        "c3"
+      ],
       "stance": "support"
     }
   ]
