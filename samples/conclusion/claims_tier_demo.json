@@ -1,0 +1,51 @@
+{
+  "claims": [
+    {"id": "c1", "label": "R01 下行样本量 n_down", "value": 798, "source": {"row": 1, "col": "n_down"}},
+    {"id": "c2", "label": "R01 上行样本量 n_up", "value": 922, "source": {"row": 1, "col": "n_up"}},
+    {"id": "c3", "label": "R01 效应量 cohen_d", "value": 0.31795219774112904, "source": {"row": 1, "col": "cohen_d"}},
+    {"id": "c4", "label": "全部关系条数", "value": 10, "derived": {"op": "countrows", "col": "relation_id"}}
+  ],
+  "conclusions": [
+    {
+      "id": "c_grounded",
+      "type": "relational",
+      "statement": "下行样本量达标（外部可核标准）",
+      "verdict": "显著",
+      "criterion": {
+        "metric": "R01 下行样本量 n_down",
+        "op": ">=",
+        "value": 100,
+        "source": "依据 Cohen(2013) 小样本效应检验最低样本量建议（外部可独立核验标准）",
+        "tier": "grounded"
+      },
+      "evidence": ["c1", "c3"]
+    },
+    {
+      "id": "c_disclosed",
+      "type": "relational",
+      "statement": "下行样本量达标（经验阈值，已承认不可核）",
+      "verdict": "显著",
+      "criterion": {
+        "metric": "R01 下行样本量 n_down",
+        "op": ">=",
+        "value": 100,
+        "source": "经验阈值：下行样本量≥100 视为可报告（人为设定，无外部依据）",
+        "tier": "disclosed"
+      },
+      "evidence": ["c1"]
+    },
+    {
+      "id": "c_undisclosed",
+      "type": "relational",
+      "statement": "下行样本量达标（未声明依据层级，应入未交代桶）",
+      "verdict": "显著",
+      "criterion": {
+        "metric": "R01 下行样本量 n_down",
+        "op": ">=",
+        "value": 100,
+        "source": "未交代依据的人为阈值"
+      },
+      "evidence": ["c1"]
+    }
+  ]
+}
